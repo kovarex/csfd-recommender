@@ -102,10 +102,16 @@ function pager(int $total): string
   return '<p class="pager">Stránka ' . $current . ' z ' . n($pages) . ' &nbsp; ' . implode(' ', $links) . '</p>';
 }
 
+function csfd_film_url(int $id, string $slug, $parentId): string
+{
+  return 'https://www.csfd.cz/film/' . ($parentId ? (int)$parentId . '/' : '') . $id . '-' . $slug . '/prehled/';
+}
+
 function film_link(array $row): string
 {
   $title = h($row['title']) . ($row['year'] ? ' (' . (int)$row['year'] . ')' : '');
-  return '<a href="' . h(url(['view' => 'film', 'id' => $row['film_id']])) . '">' . $title . '</a>';
+  return '<a href="' . h(url(['view' => 'film', 'id' => $row['film_id']])) . '">' . $title . '</a>' .
+         ' <small>(<a href="' . h(csfd_film_url((int)$row['film_id'], $row['slug'], $row['parent_id'])) . '">csfd</a>)</small>';
 }
 
 function user_link(array $row): string

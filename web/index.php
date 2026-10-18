@@ -94,7 +94,7 @@ function user_page(int $id, int $offset): void
 
   $total = (int)value('SELECT COUNT(*) FROM ratings WHERE user_id=?', [$id]);
   echo pager($total);
-  $rows = query('SELECT r.film_id, r.stars, r.rated_on, f.title, f.year, f.kind, s.average, s.rating_count
+  $rows = query('SELECT r.film_id, r.stars, r.rated_on, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count
                  FROM ratings r JOIN films f ON f.id=r.film_id LEFT JOIN film_stats s ON s.film_id=r.film_id
                  WHERE r.user_id=? ORDER BY r.rated_on DESC, r.film_id LIMIT ' . PAGE_SIZE . ' OFFSET ' . $offset, [$id]);
   ?>
@@ -135,7 +135,7 @@ function films_page(int $offset): void
     echo '<p class="note">Statistiky filmů se ještě nepřepočítaly, objeví se po dalším běhu scraperu.</p>';
   echo pager($total);
   $order = $sort === 'average' ? 's.average DESC, s.rating_count DESC' : 's.rating_count DESC, s.average DESC';
-  $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, s.rating_count, s.average
+  $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average
                  FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $where
                  ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
   ?>
@@ -159,7 +159,7 @@ function film_page(int $id, int $offset): void
     return;
   }
   header_html($film['title'] . ($film['year'] ? ' (' . $film['year'] . ')' : ''));
-  $csfd = 'https://www.csfd.cz/film/' . ($film['parent_id'] ? $film['parent_id'] . '/' : '') . $id . '-' . $film['slug'] . '/prehled/';
+  $csfd = csfd_film_url($id, $film['slug'], $film['parent_id']);
   $distribution = query('SELECT stars, COUNT(*) AS count FROM ratings WHERE film_id=? GROUP BY stars', [$id]);
   $total = array_sum(array_column($distribution, 'count'));
   $sum = 0;
@@ -193,7 +193,7 @@ function search_page(string $q): void
     return;
   }
   $like = '%' . addcslashes($q, '%_\\') . '%';
-  $films = query('SELECT f.id AS film_id, f.title, f.year, f.kind, s.rating_count, s.average FROM films f
+  $films = query('SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average FROM films f
                   LEFT JOIN film_stats s ON s.film_id=f.id WHERE f.title LIKE ?
                   ORDER BY s.rating_count DESC LIMIT 50', [$like]);
   $users = query('SELECT id AS user_id, name, rating_count FROM users WHERE name LIKE ? ORDER BY rating_count DESC LIMIT 50', [$like]);
