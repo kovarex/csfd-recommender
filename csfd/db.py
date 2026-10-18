@@ -68,6 +68,36 @@ def create_schema(connection):
             lines = [line for line in statement.splitlines() if not line.strip().startswith("--")]
             if "".join(lines).strip():
                 cursor.execute("\n".join(lines))
+    ensure_indexes(connection)
+
+
+# Indexes added after the first deployment; create_schema adds them to existing databases.
+EXTRA_INDEXES = [
+    ("users", "rating_count", "ALTER TABLE users ADD KEY rating_count (rating_count)"),
+]
+
+
+@reconnecting
+def ensure_indexes(connection):
+    with connection.cursor() as cursor:
+        for table, name, ddl in EXTRA_INDEXES:
+            cursor.execute("SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() "
+                           "AND table_name=%s AND index_name=%s LIMIT 1", (table, name))
+            if not cursor.fetchone():
+                cursor.execute(ddl)
+
+
+@reconnecting
+def refresh_film_stats(connection):
+    """Rebuilds film_stats from ratings and swaps it in atomically."""
+    with connection.cursor() as cursor:
+        cursor.execute("DROP TABLE IF EXISTS film_stats_new")
+        cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
+        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, average) "
+                       "SELECT film_id, COUNT(*), AVG(stars) FROM ratings GROUP BY film_id")
+        cursor.execute("RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
+        cursor.execute("DROP TABLE film_stats_old")
+    set_state(connection, "film_stats_at", int(time.time()))
 
 
 @reconnecting

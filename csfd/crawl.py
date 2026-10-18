@@ -163,6 +163,9 @@ def main():
     add = sub.add_parser("add", help="queue users (numeric IDs) to be scraped first, e.g. yourself")
     add.add_argument("user_ids", type=int, nargs="+")
     sub.add_parser("stats", help="show what is in the database")
+    film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
+    film_stats.add_argument("--max-age-hours", type=float, default=0,
+                            help="only rebuild when the last rebuild is older than this")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -177,6 +180,13 @@ def main():
         for user_id in args.user_ids:
             db.requeue_user(connection, user_id)
         print(f"Queued {len(args.user_ids)} user(s).")
+    elif args.command == "film-stats":
+        connection = db.connect(config)
+        db.create_schema(connection)
+        last = int(db.get_state(connection, "film_stats_at", 0))
+        if time.time() - last >= args.max_age_hours * 3600:
+            db.refresh_film_stats(connection)
+            print("Film stats rebuilt.")
     elif args.command == "stats":
         connection = db.connect(config)
         db.create_schema(connection)

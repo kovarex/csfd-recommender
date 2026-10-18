@@ -52,3 +52,12 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
   ratings_saved INT UNSIGNED NOT NULL DEFAULT 0,
   stop_reason VARCHAR(255) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Per-film aggregates for browsing, rebuilt by `python3 -m csfd.crawl film-stats`.
+CREATE TABLE IF NOT EXISTS film_stats (
+  film_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  rating_count INT UNSIGNED NOT NULL,
+  -- Average of stars 0-5.
+  average DECIMAL(4,3) NOT NULL,
+  KEY rating_count (rating_count)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

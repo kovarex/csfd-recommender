@@ -20,6 +20,16 @@ into MariaDB. The model (matrix factorisation trained on a desktop PC) and a web
 Measured 18 Oct 2026: 1 scrape.do credit per page, no challenge, ~2 pages/s with `rate = 2`
 (about 100 ratings per second, 50 per credit).
 
+## Web pages
+
+`web/` is a small PHP browser of the database: overview (counts, crawl runs, credits), users by number of ratings,
+a user's ratings, films by number of ratings or average, a film's ratings, search. `deploy-web.sh` (run by
+`run-crawl.sh` every hour) copies it to `/home/public` and writes the database login for PHP to
+`/home/protected/csfd-web.ini` (readable by the web server, without the scrape.do token).
+The pages are public; set `[web] password` in `~/csfd-config.ini` to put them behind a password.
+
+Film counts and averages come from the `film_stats` table, rebuilt every 6 hours (`python3 -m csfd.crawl film-stats`).
+
 ## Database
 
 `schema.sql` (created automatically): `users`, `films` (incl. series, seasons, episodes with `parent_id`),
