@@ -11,6 +11,9 @@ WAITING, IN_PROGRESS, DONE, MISSING, FAILED = range(5)
 
 # MySQL server has gone away, lost connection during query, can't connect.
 LOST_CONNECTION_ERRORS = (2003, 2006, 2013)
+# Deadlock and lock wait timeout: parallel workers upserting the same films. Every write is an idempotent upsert,
+# so the statement can simply be repeated.
+LOCK_ERRORS = (1205, 1213)
 RECONNECT_ATTEMPTS = 5
 
 log = logging.getLogger("csfd")
@@ -38,7 +41,8 @@ def connect(config):
 
 
 def reconnecting(function):
-    """Retries a database call after reconnecting when the server dropped the connection (seen on NFS)."""
+    """Retries a database call after a deadlock, or after reconnecting when the server dropped the connection (both
+    seen on NFS)."""
 
     @functools.wraps(function)
     def wrapper(connection, *args, **kwargs):
@@ -46,7 +50,12 @@ def reconnecting(function):
             try:
                 return function(connection, *args, **kwargs)
             except (pymysql.err.OperationalError, pymysql.err.InterfaceError) as e:
-                lost = isinstance(e, pymysql.err.InterfaceError) or e.args[0] in LOST_CONNECTION_ERRORS
+                code = e.args[0] if e.args else None
+                if code in LOCK_ERRORS and attempt < RECONNECT_ATTEMPTS - 1:
+                    log.info("Database lock conflict (%s), retrying", e)
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                lost = isinstance(e, pymysql.err.InterfaceError) or code in LOST_CONNECTION_ERRORS
                 if not lost or attempt == RECONNECT_ATTEMPTS - 1:
                     raise
                 log.warning("Database connection lost (%s), reconnecting", e)
@@ -154,18 +163,20 @@ def claim_waiting_user(connection):
 @reconnecting
 def save_page(connection, user_id, page, page_number):
     """Stores one parsed ratings page and records it as done for the user."""
+    # Writing films in ID order makes parallel workers lock shared rows in the same order, which avoids most deadlocks.
+    ratings = sorted(page.ratings, key=lambda r: r.film_id)
     with connection.cursor() as cursor:
-        if page.ratings:
+        if ratings:
             cursor.executemany(
                 "INSERT INTO films (id, parent_id, slug, title, year, kind) VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE parent_id=VALUES(parent_id), slug=VALUES(slug), title=VALUES(title), "
                 "year=VALUES(year), kind=VALUES(kind)",
-                [(r.film_id, r.parent_id, r.slug, r.title[:300], r.year, r.kind[:40]) for r in page.ratings],
+                [(r.film_id, r.parent_id, r.slug, r.title[:300], r.year, r.kind[:40]) for r in ratings],
             )
             cursor.executemany(
                 "INSERT INTO ratings (user_id, film_id, stars, rated_on) VALUES (%s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE stars=VALUES(stars), rated_on=VALUES(rated_on)",
-                [(user_id, r.film_id, r.stars, r.rated_on) for r in page.ratings],
+                [(user_id, r.film_id, r.stars, r.rated_on) for r in ratings],
             )
         cursor.execute(
             "UPDATE users SET slug=COALESCE(%s, slug), name=COALESCE(%s, name), page_count=%s, pages_done=%s "

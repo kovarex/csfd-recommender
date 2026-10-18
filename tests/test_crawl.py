@@ -3,6 +3,8 @@ import os
 import unittest
 from datetime import date
 
+import pymysql
+
 from csfd import db
 from csfd.crawl import Crawler
 from csfd.fetch import Blocked, NotFound
@@ -167,6 +169,19 @@ class CrawlTest(unittest.TestCase):
         db.set_state(victim, "x", 1)
         self.assertEqual(db.get_state(victim, "x"), "1")
         victim.close()
+
+    def test_retries_after_a_deadlock(self):
+        attempts = []
+
+        @db.reconnecting
+        def write(connection):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise pymysql.err.OperationalError(1213, "Deadlock found when trying to get lock")
+            return "saved"
+
+        self.assertEqual(write(self.connection), "saved")
+        self.assertEqual(len(attempts), 2)
 
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
