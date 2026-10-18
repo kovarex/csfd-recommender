@@ -10,16 +10,22 @@ SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 
 def connect(config):
+    """Connects to the configured database, creating it first if it doesn't exist yet."""
     section = config["mysql"]
-    return pymysql.connect(
+    connection = pymysql.connect(
         host=section.get("host", "localhost"),
         port=section.getint("port", 3306),
         user=section["user"],
         password=section["password"],
-        database=section["database"],
         charset="utf8mb4",
         autocommit=True,
     )
+    name = section["database"]
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                       % name.replace("`", "``"))
+    connection.select_db(name)
+    return connection
 
 
 def create_schema(connection):
