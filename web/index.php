@@ -62,13 +62,36 @@ function overview_page(): void
 function users_page(int $offset): void
 {
   header_html('Uživatelé');
-  $total = (int)value('SELECT COUNT(*) FROM users WHERE status=2');
+  $columns = ['name' => 'name', 'id' => 'id', 'ratings' => 'rating_count', 'scraped' => 'scraped_at'];
+  [$sort, $direction] = sort_param(array_keys($columns), 'ratings', 'desc');
+  $q = trim($_GET['q'] ?? '');
+  $where = 'status=2';
+  $params = [];
+  if ($q !== '')
+  {
+    // A number finds that user ID, anything else searches names.
+    $where .= ctype_digit($q) ? ' AND (id=? OR name LIKE ?)' : ' AND name LIKE ?';
+    $like = '%' . addcslashes($q, '%_\\') . '%';
+    $params = ctype_digit($q) ? [$q, $like] : [$like];
+  }
+  ?>
+  <form class="filters">
+    <input type="hidden" name="view" value="users">
+    <input type="hidden" name="sort" value="<?= h($sort) ?>"><input type="hidden" name="dir" value="<?= h($direction) ?>">
+    <input name="q" class="wide" placeholder="Jméno nebo ID" value="<?= h($q) ?>" autofocus> <button>Hledat</button>
+    <?php if ($q !== ''): ?><a href="<?= h(url(['view' => 'users', 'sort' => $sort, 'dir' => $direction])) ?>">zrušit</a><?php endif ?>
+  </form>
+  <?php
+  $total = (int)value("SELECT COUNT(*) FROM users WHERE $where", $params);
+  echo '<p class="note">' . n($total) . ' uživatelů</p>';
   echo pager($total);
-  $rows = query('SELECT id AS user_id, name, slug, rating_count, scraped_at FROM users WHERE status=2
-                 ORDER BY rating_count DESC, id LIMIT ' . PAGE_SIZE . ' OFFSET ' . $offset);
+  $order = $columns[$sort] . ' ' . strtoupper($direction) . ($sort === 'id' ? '' : ', id');
+  $rows = query("SELECT id AS user_id, name, slug, rating_count, scraped_at FROM users WHERE $where
+                 ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
   ?>
   <table>
-    <tr><th class="num">#</th><th>Uživatel</th><th class="num">ID</th><th class="num">Hodnocení</th><th>Staženo</th></tr>
+    <tr><th class="num">#</th><?= sort_header('Uživatel', 'name', 'asc') ?><?= sort_header('ID', 'id', 'asc', 'num') ?>
+      <?= sort_header('Hodnocení', 'ratings', 'desc', 'num') ?><?= sort_header('Staženo', 'scraped', 'desc') ?></tr>
     <?php foreach ($rows as $i => $r): ?>
       <tr><td class="num"><?= $offset + $i + 1 ?></td><td><?= user_link($r) ?></td><td class="num"><?= (int)$r['user_id'] ?></td>
         <td class="num"><?= n($r['rating_count']) ?></td><td><?= h($r['scraped_at']) ?></td></tr>

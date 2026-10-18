@@ -28,3 +28,6 @@ small, .note, .pager { color: var(--muted); }
 .filters { margin: 10px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; color: var(--muted); }
 .filters input { width: 80px; }
 @media (max-width: 600px) { th, td { padding: 4px 5px; font-size: 13px; } }
+a.sort { color: inherit; text-decoration: none; }
+a.sort:hover { text-decoration: underline; }
+.filters input.wide { width: 240px; }

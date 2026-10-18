@@ -102,6 +102,26 @@ function pager(int $total): string
   return '<p class="pager">Stránka ' . $current . ' z ' . n($pages) . ' &nbsp; ' . implode(' ', $links) . '</p>';
 }
 
+/** The requested sort column and direction, limited to the allowed columns. */
+function sort_param(array $allowed, string $default, string $defaultDirection): array
+{
+  $sort = in_array($_GET['sort'] ?? '', $allowed, true) ? $_GET['sort'] : $default;
+  $direction = ($_GET['dir'] ?? '') === 'asc' ? 'asc' : (($_GET['dir'] ?? '') === 'desc' ? 'desc' : $defaultDirection);
+  return [$sort, $direction];
+}
+
+/** A column header that sorts by the column; clicking the current sort column flips the direction. */
+function sort_header(string $label, string $key, string $firstDirection, string $class = ''): string
+{
+  $current = $_GET['sort'] ?? null;
+  $direction = $_GET['dir'] ?? null;
+  $active = $current === $key;
+  $next = $active ? ($direction === 'asc' ? 'desc' : 'asc') : $firstDirection;
+  $arrow = $active ? ($direction === 'asc' ? ' ▲' : ' ▼') : '';
+  $link = url(['sort' => $key, 'dir' => $next, 'p' => null] + $_GET);
+  return '<th class="' . $class . '"><a class="sort" href="' . h($link) . '">' . h($label) . $arrow . '</a></th>';
+}
+
 function csfd_film_url(int $id, string $slug, $parentId): string
 {
   return 'https://www.csfd.cz/film/' . ($parentId ? (int)$parentId . '/' : '') . $id . '-' . $slug . '/prehled/';

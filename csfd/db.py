@@ -74,6 +74,7 @@ def create_schema(connection):
 # Indexes added after the first deployment; create_schema adds them to existing databases.
 EXTRA_INDEXES = [
     ("users", "rating_count", "ALTER TABLE users ADD KEY rating_count (rating_count)"),
+    ("users", "name", "ALTER TABLE users ADD KEY name (name)"),
 ]
 
 

@@ -89,6 +89,9 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(first.kind, "film")
         self.assertIn("seriál", [r.kind for r in page.ratings])
         self.assertEqual(sorted({r.stars for r in page.ratings}), [1, 2, 3, 4, 5])
+        # A changed rating has a "Změněno" tooltip after its date.
+        self.assertEqual(next(r for r in page.ratings if r.film_id == 1734167).rated_on, date(2026, 2, 23))
+        self.assertNotIn(None, [r.rated_on for r in page.ratings])
 
     def test_trash_rating_is_zero(self):
         page = parse_ratings_page(ratings_page(5, 1, 1, [(10, "trash")]))
