@@ -48,6 +48,7 @@ Film counts and averages come from the `film_stats` table, rebuilt every 6 hours
    `/home/private/csfd-recommender/run-crawl.sh`, every hour.
 
 Deploying is pull-based: every hourly run first does `git pull`, so whatever is pushed to `master` is live within an hour.
+NFS kills scheduled tasks after 15 minutes, so each run scrapes for 12 minutes.
 The log goes to `~/logs/csfd-crawl.log`.
 
 ## Tests
