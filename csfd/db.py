@@ -1,10 +1,19 @@
 """MariaDB access."""
 
+import functools
+import logging
 import os
+import time
 
 import pymysql
 
 WAITING, IN_PROGRESS, DONE, MISSING, FAILED = range(5)
+
+# MySQL server has gone away, lost connection during query, can't connect.
+LOST_CONNECTION_ERRORS = (2003, 2006, 2013)
+RECONNECT_ATTEMPTS = 5
+
+log = logging.getLogger("csfd")
 
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "schema.sql")
 
@@ -12,7 +21,7 @@ SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 def connect(config):
     """Connects to the configured database, creating it first if it doesn't exist yet."""
     section = config["mysql"]
-    connection = pymysql.connect(
+    settings = dict(
         host=section.get("host", "localhost"),
         port=section.getint("port", 3306),
         user=section["user"],
@@ -21,13 +30,36 @@ def connect(config):
         autocommit=True,
     )
     name = section["database"]
-    with connection.cursor() as cursor:
-        cursor.execute("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                       % name.replace("`", "``"))
-    connection.select_db(name)
-    return connection
+    with pymysql.connect(**settings) as server:
+        with server.cursor() as cursor:
+            cursor.execute("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                           % name.replace("`", "``"))
+    return pymysql.connect(database=name, **settings)
 
 
+def reconnecting(function):
+    """Retries a database call after reconnecting when the server dropped the connection (seen on NFS)."""
+
+    @functools.wraps(function)
+    def wrapper(connection, *args, **kwargs):
+        for attempt in range(RECONNECT_ATTEMPTS):
+            try:
+                return function(connection, *args, **kwargs)
+            except (pymysql.err.OperationalError, pymysql.err.InterfaceError) as e:
+                lost = isinstance(e, pymysql.err.InterfaceError) or e.args[0] in LOST_CONNECTION_ERRORS
+                if not lost or attempt == RECONNECT_ATTEMPTS - 1:
+                    raise
+                log.warning("Database connection lost (%s), reconnecting", e)
+                time.sleep(2 ** attempt)
+                try:
+                    connection.ping(reconnect=True)
+                except pymysql.err.Error:
+                    pass
+
+    return wrapper
+
+
+@reconnecting
 def create_schema(connection):
     with open(SCHEMA_PATH, encoding="utf-8") as f:
         statements = [s.strip() for s in f.read().split(";")]
@@ -38,6 +70,7 @@ def create_schema(connection):
                 cursor.execute("\n".join(lines))
 
 
+@reconnecting
 def get_state(connection, name, default=None):
     with connection.cursor() as cursor:
         cursor.execute("SELECT value FROM crawl_state WHERE name=%s", (name,))
@@ -45,6 +78,7 @@ def get_state(connection, name, default=None):
     return row[0] if row else default
 
 
+@reconnecting
 def set_state(connection, name, value):
     with connection.cursor() as cursor:
         cursor.execute(
@@ -53,11 +87,13 @@ def set_state(connection, name, value):
         )
 
 
+@reconnecting
 def add_users(connection, user_ids):
     with connection.cursor() as cursor:
         cursor.executemany("INSERT IGNORE INTO users (id) VALUES (%s)", [(i,) for i in user_ids])
 
 
+@reconnecting
 def requeue_user(connection, user_id):
     """Scrape the user again from the first page (keeps ratings already stored, updates changed ones)."""
     with connection.cursor() as cursor:
@@ -68,11 +104,13 @@ def requeue_user(connection, user_id):
         )
 
 
+@reconnecting
 def reset_interrupted(connection):
     with connection.cursor() as cursor:
         cursor.execute("UPDATE users SET status=%s WHERE status=%s", (WAITING, IN_PROGRESS))
 
 
+@reconnecting
 def claim_waiting_user(connection):
     with connection.cursor() as cursor:
         cursor.execute("SELECT id, pages_done FROM users WHERE status=%s ORDER BY priority DESC, id LIMIT 1", (WAITING,))
@@ -82,6 +120,7 @@ def claim_waiting_user(connection):
     return row
 
 
+@reconnecting
 def save_page(connection, user_id, page, page_number):
     """Stores one parsed ratings page and records it as done for the user."""
     with connection.cursor() as cursor:
@@ -104,6 +143,7 @@ def save_page(connection, user_id, page, page_number):
         )
 
 
+@reconnecting
 def finish_user(connection, user_id, status, error=None):
     with connection.cursor() as cursor:
         cursor.execute(
@@ -113,18 +153,21 @@ def finish_user(connection, user_id, status, error=None):
         )
 
 
+@reconnecting
 def release_user(connection, user_id):
     """Puts an unfinished user back in the queue; the next run continues after pages_done."""
     with connection.cursor() as cursor:
         cursor.execute("UPDATE users SET status=%s WHERE id=%s", (WAITING, user_id))
 
 
+@reconnecting
 def start_run(connection):
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO crawl_runs (started_at) VALUES (NOW())")
         return cursor.lastrowid
 
 
+@reconnecting
 def finish_run(connection, run_id, stats, fetcher, stop_reason):
     with connection.cursor() as cursor:
         cursor.execute(
@@ -135,6 +178,7 @@ def finish_run(connection, run_id, stats, fetcher, stop_reason):
         )
 
 
+@reconnecting
 def stats(connection):
     with connection.cursor() as cursor:
         cursor.execute("SELECT status, COUNT(*), SUM(rating_count) FROM users GROUP BY status")

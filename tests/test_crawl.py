@@ -156,6 +156,15 @@ class CrawlTest(unittest.TestCase):
         self.assertEqual(self.crawl(fetcher), "credits below 100")
         self.assertLess(fetcher.requests, 10)
 
+    def test_reconnects_after_the_server_drops_the_connection(self):
+        db.create_schema(self.connection)
+        victim = db.connect(self.config)
+        with self.connection.cursor() as cursor:
+            cursor.execute("KILL %s", (victim.thread_id(),))
+        db.set_state(victim, "x", 1)
+        self.assertEqual(db.get_state(victim, "x"), "1")
+        victim.close()
+
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
         db.create_schema(self.connection)
