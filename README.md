@@ -27,19 +27,18 @@ Measured 18 Oct 2026: 1 scrape.do credit per page, no challenge, ~2 pages/s with
 
 ## Setup on NearlyFreeSpeech
 
-1. Create a MariaDB database `csfd` and a user for it (or reuse an existing MySQL process with a new database).
-2. Over SSH:
+1. Create a MariaDB database `csfd` and a user for it (a new MySQL process, or a new database on an existing one).
+2. Over SSH, once:
    ```
-   cd /home/private && git clone https://github.com/kovarex/csfd-recommender.git
-   python3 -m pip install --user -r csfd-recommender/requirements.txt
-   cp csfd-recommender/config.example.ini ~/csfd-config.ini   # fill in token and MySQL login
-   cd csfd-recommender
-   python3 -m csfd.crawl add <your numeric ČSFD user id>       # optional: scrape yourself first
-   python3 -m csfd.crawl run --minutes 2                       # try it
-   python3 -m csfd.crawl stats
+   cd /home/private && git clone https://github.com/kovarex/csfd-recommender.git && sh csfd-recommender/setup-nfs.sh
    ```
+   It installs PyMySQL, asks for the scrape.do token and the MySQL login (saved to `~/csfd-config.ini`, readable only by you),
+   creates the tables and does a 1-minute test run.
 3. In the NFS member UI, site → **Scheduled Tasks** → **Add a Scheduled Task**: command
-   `/home/private/csfd-recommender/run-crawl.sh`, every hour. The log goes to `~/logs/csfd-crawl.log`.
+   `/home/private/csfd-recommender/run-crawl.sh`, every hour.
+
+Deploying is pull-based: every hourly run first does `git pull`, so whatever is pushed to `master` is live within an hour.
+The log goes to `~/logs/csfd-crawl.log`.
 
 ## Tests
 
