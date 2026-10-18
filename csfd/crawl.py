@@ -160,6 +160,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="scrape until the time limit, credit limit or the end")
     run.add_argument("--minutes", type=float, default=50)
+    run.add_argument("--rate", type=float, help="requests per second (overrides the config)")
+    run.add_argument("--workers", type=int, help="parallel downloads (overrides the config)")
     add = sub.add_parser("add", help="queue users (numeric IDs) to be scraped first, e.g. yourself")
     add.add_argument("user_ids", type=int, nargs="+")
     sub.add_parser("stats", help="show what is in the database")
@@ -172,6 +174,10 @@ def main():
     config = load_config(args.config)
 
     if args.command == "run":
+        if args.rate:
+            config["crawl"]["rate"] = str(args.rate)
+        if args.workers:
+            config["crawl"]["workers"] = str(args.workers)
         fetcher = ScrapeDoFetcher(config["scrape_do"]["token"], rate=float(config["crawl"].get("rate", 2)))
         Crawler(config, fetcher).run(args.minutes)
     elif args.command == "add":
