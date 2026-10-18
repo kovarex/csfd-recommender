@@ -56,7 +56,8 @@ def requeue_user(connection, user_id):
     """Scrape the user again from the first page (keeps ratings already stored, updates changed ones)."""
     with connection.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO users (id) VALUES (%s) ON DUPLICATE KEY UPDATE status=%s, pages_done=0, error=NULL",
+            "INSERT INTO users (id, priority) VALUES (%s, 1) "
+            "ON DUPLICATE KEY UPDATE status=%s, priority=1, pages_done=0, error=NULL",
             (user_id, WAITING),
         )
 
@@ -68,7 +69,7 @@ def reset_interrupted(connection):
 
 def claim_waiting_user(connection):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT id, pages_done FROM users WHERE status=%s ORDER BY id LIMIT 1", (WAITING,))
+        cursor.execute("SELECT id, pages_done FROM users WHERE status=%s ORDER BY priority DESC, id LIMIT 1", (WAITING,))
         row = cursor.fetchone()
         if row:
             cursor.execute("UPDATE users SET status=%s WHERE id=%s", (IN_PROGRESS, row[0]))

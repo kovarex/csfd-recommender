@@ -159,6 +159,7 @@ class CrawlTest(unittest.TestCase):
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
         db.create_schema(self.connection)
+        db.add_users(self.connection, [1, 2])
         db.requeue_user(self.connection, 500)
         fetcher = FakeFetcher(pages)
         self.crawl(fetcher)

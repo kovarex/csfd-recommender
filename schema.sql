@@ -6,12 +6,14 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(100) NULL,
   -- 0 = waiting, 1 = in progress, 2 = done, 3 = does not exist, 4 = failed
   status TINYINT NOT NULL DEFAULT 0,
+  -- Users added by hand are scraped before the rest.
+  priority TINYINT NOT NULL DEFAULT 0,
   page_count INT UNSIGNED NULL,
   pages_done INT UNSIGNED NOT NULL DEFAULT 0,
   rating_count INT UNSIGNED NOT NULL DEFAULT 0,
   scraped_at DATETIME NULL,
   error VARCHAR(255) NULL,
-  KEY status (status)
+  KEY queue (status, priority, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS films (
