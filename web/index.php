@@ -50,12 +50,12 @@ function overview_page(): void
   <table>
     <tr><th>Začátek</th><th>Konec</th><th class="num">Požadavků</th><th class="num">Uživatelů</th><th class="num">Hodnocení</th><th class="num">Kredity zbývají</th><th>Proč skončil</th></tr>
     <?php foreach (query('SELECT * FROM crawl_runs ORDER BY id DESC LIMIT 15') as $r): ?>
-      <tr><td><?= h($r['started_at']) ?></td><td><?= h($r['finished_at'] ?? 'běží') ?></td><td class="num"><?= n($r['requests']) ?></td>
+      <tr><td><?= h(local_time($r['started_at'])) ?></td><td><?= $r['finished_at'] ? h(local_time($r['finished_at'])) : 'běží' ?></td><td class="num"><?= n($r['requests']) ?></td>
         <td class="num"><?= n($r['users_done']) ?></td><td class="num"><?= n($r['ratings_saved']) ?></td>
         <td class="num"><?= $r['credits_remaining'] === null ? '' : n($r['credits_remaining']) ?></td><td><?= h($r['stop_reason']) ?></td></tr>
     <?php endforeach ?>
   </table>
-  <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? date('j. n. Y H:i', (int)$statsAt) : 'zatím ne' ?> (každých 6 hodin).</p>
+  <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? h(local_time($statsAt)) . ', další přepočet po ' . h(local_time($statsAt + 6 * 3600)) : 'zatím ne' ?> (každých 6 hodin, s nejbližším během).</p>
   <?php
 }
 
@@ -94,7 +94,7 @@ function users_page(int $offset): void
       <?= sort_header('Hodnocení', 'ratings', 'desc', 'num') ?><?= sort_header('Staženo', 'scraped', 'desc') ?></tr>
     <?php foreach ($rows as $i => $r): ?>
       <tr><td class="num"><?= $offset + $i + 1 ?></td><td><?= user_link($r) ?></td><td class="num"><?= (int)$r['user_id'] ?></td>
-        <td class="num"><?= n($r['rating_count']) ?></td><td><?= h($r['scraped_at']) ?></td></tr>
+        <td class="num"><?= n($r['rating_count']) ?></td><td><?= h(local_time($r['scraped_at'])) ?></td></tr>
     <?php endforeach ?>
   </table>
   <?php
@@ -112,7 +112,7 @@ function user_page(int $id, int $offset): void
   header_html($user['name'] ?? "Uživatel $id");
   $csfd = 'https://www.csfd.cz/uzivatel/' . $id . ($user['slug'] ? '-' . $user['slug'] : '') . '/hodnoceni/';
   echo '<p>' . n($user['rating_count']) . ' hodnocení · stav ' . h(STATUS_NAMES[$user['status']] ?? '') .
-       ' · staženo ' . h($user['scraped_at'] ?? '–') . ' · <a href="' . h($csfd) . '">profil na ČSFD</a></p>';
+       ' · staženo ' . h(local_time($user['scraped_at'])) . ' · <a href="' . h($csfd) . '">profil na ČSFD</a></p>';
   distribution(query('SELECT stars, COUNT(*) AS count FROM ratings WHERE user_id=? GROUP BY stars', [$id]));
 
   $total = (int)value('SELECT COUNT(*) FROM ratings WHERE user_id=?', [$id]);

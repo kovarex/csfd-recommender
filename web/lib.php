@@ -122,6 +122,21 @@ function sort_header(string $label, string $key, string $firstDirection, string 
   return '<th class="' . $class . '"><a class="sort" href="' . h($link) . '">' . h($label) . $arrow . '</a></th>';
 }
 
+/** A time for display in Prague time. Takes a Unix timestamp, or a DATETIME written by the database with NOW(). */
+function local_time($time): string
+{
+  static $dbOffset = null;
+  if ($time === null || $time === '')
+    return '–';
+  if (!is_numeric($time))
+  {
+    // NOW() is in the database server's time zone (UTC on NFS); ask it rather than assume.
+    $dbOffset ??= (int)value('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())');
+    $time = strtotime($time . ' UTC') - $dbOffset;
+  }
+  return (new DateTime('@' . (int)$time))->setTimezone(new DateTimeZone('Europe/Prague'))->format('j. n. Y H:i');
+}
+
 function csfd_film_url(int $id, string $slug, $parentId): string
 {
   return 'https://www.csfd.cz/film/' . ($parentId ? (int)$parentId . '/' : '') . $id . '-' . $slug . '/prehled/';
