@@ -11,7 +11,7 @@ if [ ! -f "$CONFIG" ]; then
   printf "scrape.do token: "; read -r TOKEN
   printf "MySQL host (e.g. csfd.db): "; read -r DB_HOST
   printf "MySQL user: "; read -r DB_USER
-  stty -echo; printf "MySQL password: "; read -r DB_PASSWORD; stty echo; echo
+  stty -echo 2>/dev/null || true; printf "MySQL password: "; read -r DB_PASSWORD; stty echo 2>/dev/null || true; echo
   printf "MySQL database [csfd]: "; read -r DB_NAME
   umask 077
   cat > "$CONFIG" <<CONFIG_END
