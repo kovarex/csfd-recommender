@@ -55,7 +55,7 @@ function overview_page(): void
         <td class="num"><?= $r['credits_remaining'] === null ? '' : n($r['credits_remaining']) ?></td><td><?= h($r['stop_reason']) ?></td></tr>
     <?php endforeach ?>
   </table>
-  <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? h(local_time($statsAt)) . ', další přepočet po ' . h(local_time($statsAt + 6 * 3600)) : 'zatím ne' ?> (každých 6 hodin, s nejbližším během).</p>
+  <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? h(local_time($statsAt)) . ', další přepočet po ' . h(local_time($statsAt + 4 * 3600)) : 'zatím ne' ?> (každé 4 hodiny, s nejbližším během).</p>
   <?php
 }
 

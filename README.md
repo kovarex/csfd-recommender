@@ -28,7 +28,7 @@ a user's ratings, films by number of ratings or average, a film's ratings, searc
 `/home/protected/csfd-web.ini` (readable by the web server, without the scrape.do token).
 The pages are public; set `[web] password` in `~/csfd-config.ini` to put them behind a password.
 
-Film counts and averages come from the `film_stats` table, rebuilt every 6 hours (`python3 -m csfd.crawl film-stats`).
+Film counts and averages come from the `film_stats` table, rebuilt every 4 hours (`python3 -m csfd.crawl film-stats`).
 
 ## Database
 
