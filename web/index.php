@@ -99,7 +99,7 @@ function user_page(int $id, int $offset): void
                  WHERE r.user_id=? ORDER BY r.rated_on DESC, r.film_id LIMIT ' . PAGE_SIZE . ' OFFSET ' . $offset, [$id]);
   ?>
   <table>
-    <tr><th>Film</th><th>Typ</th><th>Hodnocení</th><th class="num">Průměr všech</th><th>Datum</th></tr>
+    <tr><th>Film</th><th>Typ</th><th>Hodnocení</th><th class="num">Procenta všech</th><th>Datum</th></tr>
     <?php foreach ($rows as $r): ?>
       <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><td class="stars"><?= stars((int)$r['stars']) ?></td>
         <td class="num"><?= average($r) ?></td><td><?= h($r['rated_on']) ?></td></tr>
@@ -140,7 +140,7 @@ function films_page(int $offset): void
                  ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
   ?>
   <table>
-    <tr><th class="num">#</th><th>Film</th><th>Typ</th><th class="num">Hodnocení</th><th class="num">Průměr</th></tr>
+    <tr><th class="num">#</th><th>Film</th><th>Typ</th><th class="num">Hodnocení</th><th class="num">Procenta</th></tr>
     <?php foreach ($rows as $i => $r): ?>
       <tr><td class="num"><?= $offset + $i + 1 ?></td><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td>
         <td class="num"><?= n($r['rating_count']) ?></td><td class="num"><?= average($r) ?></td></tr>
@@ -166,7 +166,7 @@ function film_page(int $id, int $offset): void
   foreach ($distribution as $d)
     $sum += $d['stars'] * $d['count'];
   echo '<p>' . h($film['kind']) . ($film['parent_title'] ? ' · patří k <a href="' . h(url(['view' => 'film', 'id' => $film['parent_id']])) . '">' . h($film['parent_title']) . '</a>' : '') .
-       ' · ' . n($total) . ' hodnocení' . ($total ? ' · průměr ' . number_format($sum / $total, 2, ',', '') . ' (' . round($sum / $total * 20) . ' %)' : '') .
+       ' · ' . n($total) . ' hodnocení' . ($total ? ' · ' . percent($sum / $total) : '') .
        ' · <a href="' . h($csfd) . '">na ČSFD</a></p>';
   distribution($distribution);
 
@@ -200,7 +200,7 @@ function search_page(string $q): void
   ?>
   <h2>Filmy</h2>
   <table>
-    <tr><th>Film</th><th>Typ</th><th class="num">Hodnocení</th><th class="num">Průměr</th></tr>
+    <tr><th>Film</th><th>Typ</th><th class="num">Hodnocení</th><th class="num">Procenta</th></tr>
     <?php foreach ($films as $r): ?>
       <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><td class="num"><?= n($r['rating_count']) ?></td><td class="num"><?= average($r) ?></td></tr>
     <?php endforeach ?>
@@ -219,7 +219,7 @@ function average(array $row): string
 {
   if ($row['average'] === null)
     return '';
-  return number_format((float)$row['average'], 2, ',', '') . ' <small>(' . n($row['rating_count']) . ')</small>';
+  return percent($row['average']) . ' <small>(' . n($row['rating_count']) . ')</small>';
 }
 
 function distribution(array $rows): void

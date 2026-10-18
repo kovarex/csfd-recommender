@@ -111,7 +111,14 @@ function film_link(array $row): string
 {
   $title = h($row['title']) . ($row['year'] ? ' (' . (int)$row['year'] . ')' : '');
   return '<a href="' . h(url(['view' => 'film', 'id' => $row['film_id']])) . '">' . $title . '</a>' .
-         ' <small>(<a href="' . h(csfd_film_url((int)$row['film_id'], $row['slug'], $row['parent_id'])) . '">csfd</a>)</small>';
+         ' <small>(<a href="' . h(csfd_film_url((int)$row['film_id'], $row['slug'], $row['parent_id'])) . '">csfd</a>' .
+         (isset($row['average']) ? ' ' . percent($row['average']) : '') . ')</small>';
+}
+
+// ČSFD's percentage is the average rating times 20 (odpad = 0 %); ours is computed from the scraped ratings.
+function percent($average): string
+{
+  return round((float)$average * 20) . "\u{00a0}%";
 }
 
 function user_link(array $row): string
