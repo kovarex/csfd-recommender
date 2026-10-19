@@ -61,7 +61,7 @@ The log goes to `~/logs/csfd-crawl.log`.
 2. On the PC (WSL), once: `git clone https://github.com/kovarex/csfd-recommender.git && cd csfd-recommender &&
    python3 -m venv .venv && . .venv/bin/activate && pip install -r ml/requirements.txt` (for the GPU install torch
    from the CUDA index first, see `ml/requirements.txt`). Then download the export:
-   `scp '<nfs login>:exports/*.gz' ~/csfd-data/`.
+   `scp 'kovarex_csfd-recommender@ssh.nyc1.nearlyfreespeech.net:/home/private/exports/*.gz' ~/csfd-data/`.
 3. Train and look at the recommendations:
    ```
    python3 -m ml.train --data ~/csfd-data --out model.npz
