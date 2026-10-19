@@ -115,16 +115,19 @@ class FetchTest(unittest.TestCase):
         fetcher = ScrapeDoFetcher("token", rate=1000, render=render)
         fetcher.calls = []
 
-        def request(url, wait_ms=0):
-            fetcher.calls.append(fetcher.rendering)
-            if fetcher.rendering and url not in fetcher.challenged_renders:
+        def request(url, wait_ms=0, render=None):
+            rendering = fetcher.rendering if render is None else render
+            fetcher.calls.append(rendering)
+            if rendering and url not in fetcher.challenged_renders:
                 return 200, "rendered page"
+            if not rendering and url in fetcher.plain_ok:
+                return 200, "plain page"
             if wait_ms:
                 fetcher.challenged_renders.discard(url)  # Waiting longer solves the challenge on the next try.
             return 200, "<title>Making sure you&#39;re not a bot!</title>"
 
         fetcher.challenged_renders = set()
-
+        fetcher.plain_ok = set()
         fetcher._request = request
         return fetcher
 
@@ -143,7 +146,7 @@ class FetchTest(unittest.TestCase):
 
     def test_gives_up_on_a_page_after_ten_attempts_and_stops_after_twenty_failures(self):
         fetcher = self.fetcher("always")
-        always_challenged = lambda url, wait_ms=0: (fetcher.calls.append(wait_ms),
+        always_challenged = lambda url, wait_ms=0, render=None: (fetcher.calls.append(wait_ms),
                                                      (200, "<title>Making sure you&#39;re not a bot!</title>"))[1]
         rendered = fetcher._request
         with unittest.mock.patch("time.sleep"):
@@ -162,6 +165,15 @@ class FetchTest(unittest.TestCase):
             with self.assertRaises(Blocked):
                 fetcher.get("d")
             self.assertEqual(len(fetcher.calls), 15)
+
+    def test_switches_back_to_plain_requests_when_the_challenge_is_off(self):
+        fetcher = self.fetcher("auto")
+        fetcher.probe_seconds = 0
+        self.assertEqual(fetcher.get("a"), "rendered page")  # Plain challenge, then rendered; probe was due later.
+        fetcher.plain_ok.add("b")
+        fetcher.next_probe = 0
+        self.assertEqual(fetcher.get("b"), "plain page")
+        self.assertFalse(fetcher.rendering)
 
     def test_never_render_stops_on_a_bot_challenge(self):
         with self.assertRaises(Blocked):

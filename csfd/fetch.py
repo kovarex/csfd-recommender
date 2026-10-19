@@ -57,11 +57,12 @@ def is_challenge(body):
 
 
 class ScrapeDoFetcher:
-    """render: "auto" switches to scrape.do's headless browser (5 credits a page instead of 1) for the rest of the
-    run once ČSFD serves its Anubis bot challenge (on since 19 Oct 2026); "always" and "never" force the mode."""
+    """render: "auto" switches to scrape.do's headless browser (5 credits a page instead of 1) once ČSFD serves its
+    Anubis bot challenge (on since 19 Oct 2026), and tries a plain request again every probe_seconds to switch back
+    when the challenge is off; "always" and "never" force the mode."""
 
     def __init__(self, token, rate=2.0, timeout=90, retries=3, render="auto", render_attempts=10, max_challenges=20,
-                 challenge_credit=5):
+                 challenge_credit=5, probe_seconds=120):
         self.token = token
         self.render_mode = render
         self.rendering = render == "always"
@@ -75,12 +76,26 @@ class ScrapeDoFetcher:
         self.max_challenges = max_challenges
         self.challenge_credit = challenge_credit
         self.challenges = 0
+        self.probe_seconds = probe_seconds
+        self.next_probe = 0.0
         self.lock = threading.Lock()
         self.requests = 0
         self.credits_used = 0
         self.credits_remaining = None
 
     def get(self, url):
+        if self._should_probe():
+            self.limiter.wait()
+            try:
+                status, body = self._request(url, render=False)
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                status, body = None, ""
+            if status == 200 and not is_challenge(body) and not is_not_found(body):
+                with self.lock:
+                    if self.rendering:
+                        log.info("ČSFD serves pages without the bot challenge again, stopping rendering")
+                        self.rendering = False
+                return body
         last_error = None
         failures = 0
         waits = 0
@@ -112,6 +127,7 @@ class ScrapeDoFetcher:
                         if not self.rendering:
                             log.info("ČSFD serves a bot challenge, switching to rendering in a browser")
                             self.rendering = True
+                            self.next_probe = time.monotonic() + self.probe_seconds
                 else:
                     raise Blocked(url)
                 continue
@@ -121,6 +137,17 @@ class ScrapeDoFetcher:
             failures += 1
             time.sleep(5 * failures)
         raise FetchError(f"Giving up on {url}: {last_error}")
+
+    def _should_probe(self):
+        """True for one request every probe_seconds while rendering in auto mode."""
+        if not self.rendering or self.render_mode != "auto":
+            return False
+        with self.lock:
+            now = time.monotonic()
+            if now < self.next_probe:
+                return False
+            self.next_probe = now + self.probe_seconds
+            return True
 
     def _challenged(self, url, attempts):
         with self.lock:
@@ -134,9 +161,9 @@ class ScrapeDoFetcher:
         with self.lock:
             self.challenges = max(0, self.challenges - self.challenge_credit)
 
-    def _request(self, url, wait_ms=0):
+    def _request(self, url, wait_ms=0, render=None):
         params = {"token": self.token, "url": url, "geoCode": "cz"}
-        if self.rendering:
+        if self.rendering if render is None else render:
             params["render"] = "true"
         if wait_ms:
             params["customWait"] = str(wait_ms)
