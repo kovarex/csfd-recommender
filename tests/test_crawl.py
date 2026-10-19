@@ -261,6 +261,19 @@ class CrawlTest(unittest.TestCase):
         db.save_page(self.connection, 1, RatingsPage(1, "u", "U", 1, [rating]), 1)
         self.assertEqual(self.query("SELECT LENGTH(slug) FROM films WHERE id=10"), ((600,),))
 
+    def test_export_writes_every_rating(self):
+        import csv, gzip, tempfile
+        from csfd import export
+        db.create_schema(self.connection)
+        pages = {url(1): ratings_page(1, 1, 1, [(100, "stars-5")]), url(450): ratings_page(450, 1, 1, [(101, "trash")])}
+        db.requeue_user(self.connection, 1)
+        db.requeue_user(self.connection, 450)
+        self.crawl(FakeFetcher(pages))
+        with tempfile.TemporaryDirectory() as directory:
+            export.export(self.connection, directory)
+            with gzip.open(os.path.join(directory, "ratings.csv.gz"), "rt") as f:
+                self.assertEqual(sorted(csv.reader(f))[:-1], [["1", "100", "5"], ["450", "101", "0"]])
+
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
         db.create_schema(self.connection)
