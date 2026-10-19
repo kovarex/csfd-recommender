@@ -1,0 +1,4 @@
+numpy>=1.26
+pandas>=2.1
+# On the PC with the RTX 5080 install the CUDA build: pip install torch --index-url https://download.pytorch.org/whl/cu128
+torch>=2.7

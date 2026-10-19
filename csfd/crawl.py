@@ -11,7 +11,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import db
+from . import db, export
 from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, ratings_url
 from .parse import NotRatingsPage, parse_ratings_page
 
@@ -171,6 +171,8 @@ def main():
     add = sub.add_parser("add", help="queue users (numeric IDs) to be scraped first, e.g. yourself")
     add.add_argument("user_ids", type=int, nargs="+")
     sub.add_parser("stats", help="show what is in the database")
+    export_parser = sub.add_parser("export", help="write ratings, films and users to gzipped CSV for training")
+    export_parser.add_argument("--dir", default=os.path.expanduser("~/exports"))
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
     film_stats.add_argument("--max-age-hours", type=float, default=0,
                             help="only rebuild when the last rebuild is older than this")
@@ -200,6 +202,8 @@ def main():
         if time.time() - last >= args.max_age_hours * 3600:
             db.refresh_film_stats(connection)
             print("Film stats rebuilt.")
+    elif args.command == "export":
+        export.export(db.connect(config), args.dir)
     elif args.command == "stats":
         connection = db.connect(config)
         db.create_schema(connection)

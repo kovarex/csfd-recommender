@@ -3,8 +3,9 @@
 Movie recommendations from [ČSFD](https://www.csfd.cz) ratings: give it your ratings and it suggests films
 that people who rate like you liked.
 
-Status: step 1, the scraper. It downloads users' public rating pages through [scrape.do](https://scrape.do)
-into MariaDB. The model (matrix factorisation trained on a desktop PC) and a web page for recommendations come next.
+Status: the scraper downloads users' public rating pages through [scrape.do](https://scrape.do) into MariaDB;
+the first model (matrix factorisation, trained on a desktop PC from a CSV export) is in `ml/`. A web page for
+recommendations comes next.
 
 ## How the scraper works
 
@@ -50,6 +51,28 @@ Film counts and averages come from the `film_stats` table, rebuilt every 4 hours
 Deploying is pull-based: every hourly run first does `git pull`, so whatever is pushed to `master` is live within an hour.
 NFS kills scheduled tasks after 15 minutes, so each run scrapes for 12 minutes.
 The log goes to `~/logs/csfd-crawl.log`.
+
+## Training the model
+
+1. On NFS, export the database (about 100 MB per 10 million ratings) to `~/exports`:
+   ```
+   cd /home/private/csfd-recommender && python3 -m csfd.crawl export
+   ```
+2. On the PC (WSL), once: `git clone https://github.com/kovarex/csfd-recommender.git && cd csfd-recommender &&
+   python3 -m venv .venv && . .venv/bin/activate && pip install -r ml/requirements.txt` (for the GPU install torch
+   from the CUDA index first, see `ml/requirements.txt`). Then download the export:
+   `scp '<nfs login>:exports/*.gz' ~/csfd-data/`.
+3. Train and look at the recommendations:
+   ```
+   python3 -m ml.train --data ~/csfd-data --out model.npz
+   python3 -m ml.recommend --data ~/csfd-data --model model.npz --user 63015
+   ```
+
+`ml.train` holds out 5 % of the ratings and prints the error on them (RMSE in stars) after every epoch, next to the
+baseline of predicting the mean for everyone; it stops when the error stops improving. `ml.recommend` computes the
+user's taste vector from their ratings against the film vectors (the same calculation the web page will do), so it
+works for any user in the export. Options: `--factors`, `--reg`, `--lr`, `--epochs` (train); `--min-ratings`,
+`--exclude-kinds`, `--top` (recommend).
 
 ## Tests
 
