@@ -77,7 +77,10 @@ and `ml.recommend … --genre scifi` (or `scifi,fantasy`) filters by them. The w
 baseline of predicting the mean for everyone; it stops when the error stops improving. `ml.recommend` computes the
 user's taste vector from their ratings against the film vectors (the same calculation the web page will do), so it
 works for any user in the export. Options: `--factors`, `--reg`, `--lr`, `--epochs` (train); `--min-ratings`,
-`--exclude-kinds`, `--top`, `--sort best|above|below` (recommend; above/below sort by how much the prediction for you differs from the prediction for an average viewer).
+`--exclude-kinds`, `--top`, `--sort best|above|below|match|opposite` (recommend; above/below sort by how much the
+prediction for you differs from the prediction for an average viewer, match/opposite by the angle between your taste
+vector and the film's, which ignores how good the film is). `python3 -m ml.twins --user 63015` lists the users with the
+closest and the most opposite taste vector, with the number of films you both rated and the average difference.
 
 ## Tests
 

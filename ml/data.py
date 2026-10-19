@@ -35,3 +35,7 @@ def load_genres(directory):
 def csfd_url(film_id, slug, parent_id):
     parent = f"{int(parent_id)}/" if not pd.isna(parent_id) else ""
     return f"https://www.csfd.cz/film/{parent}{film_id}-{slug}/prehled/"
+
+
+def csfd_user_url(user_id, slug):
+    return f"https://www.csfd.cz/uzivatel/{user_id}-{slug}/"
