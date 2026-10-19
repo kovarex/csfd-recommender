@@ -56,13 +56,17 @@ class ScrapeDoFetcher:
     """render: "auto" switches to scrape.do's headless browser (5 credits a page instead of 1) for the rest of the
     run once ČSFD serves its Anubis bot challenge (on since 19 Oct 2026); "always" and "never" force the mode."""
 
-    def __init__(self, token, rate=2.0, timeout=90, retries=3, render="auto"):
+    def __init__(self, token, rate=2.0, timeout=90, retries=3, render="auto", max_challenges=5):
         self.token = token
         self.render_mode = render
         self.rendering = render == "always"
         self.limiter = RateLimiter(rate)
         self.timeout = timeout
         self.retries = retries
+        # Rendered pages that still show the challenge add one, pages that come through take one off; the run stops
+        # as blocked when it reaches max_challenges.
+        self.max_challenges = max_challenges
+        self.challenges = 0
         self.lock = threading.Lock()
         self.requests = 0
         self.credits_used = 0
@@ -70,37 +74,54 @@ class ScrapeDoFetcher:
 
     def get(self, url):
         last_error = None
-        for attempt in range(self.retries):
-            if attempt:
-                time.sleep(5 * attempt)
+        failures = 0
+        waits = 0
+        while failures < self.retries:
             self.limiter.wait()
             try:
                 # A rendered page sometimes comes back before the browser solved the challenge; wait longer on a retry.
-                status, body = self._request(url, wait_ms=3000 * attempt if self.rendering else 0)
+                status, body = self._request(url, wait_ms=min(3000 * waits, 10000) if self.rendering else 0)
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 last_error = e
+                failures += 1
+                time.sleep(5 * failures)
                 continue
             if status == 404 or (status == 200 and is_not_found(body)):
+                self._passed()
                 raise NotFound(url)
             if status == 200:
                 if not is_challenge(body):
+                    self._passed()
                     return body
                 if self.rendering:
-                    last_error = Blocked(url)
-                    continue
-                if self.render_mode != "auto":
+                    self._challenged(url)
+                    waits += 1
+                elif self.render_mode == "auto":
+                    with self.lock:
+                        if not self.rendering:
+                            log.info("ČSFD serves a bot challenge, switching to rendering in a browser")
+                            self.rendering = True
+                else:
                     raise Blocked(url)
-                with self.lock:
-                    if not self.rendering:
-                        log.info("ČSFD serves a bot challenge, switching to rendering in a browser")
-                        self.rendering = True
-                return self.get(url)
+                continue
             last_error = FetchError(f"HTTP {status} for {url}")
             if status in (401, 403):
                 break
-        if isinstance(last_error, Blocked):
-            raise last_error
+            failures += 1
+            time.sleep(5 * failures)
         raise FetchError(f"Giving up on {url}: {last_error}")
+
+    def _challenged(self, url):
+        with self.lock:
+            self.challenges += 1
+            if self.challenges >= self.max_challenges:
+                raise Blocked(url)
+        log.info("Rendered page still shows the bot challenge (%s of %s), retrying", self.challenges,
+                 self.max_challenges)
+
+    def _passed(self):
+        with self.lock:
+            self.challenges = max(0, self.challenges - 1)
 
     def _request(self, url, wait_ms=0):
         params = {"token": self.token, "url": url, "geoCode": "cz"}

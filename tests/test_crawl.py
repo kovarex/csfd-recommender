@@ -141,6 +141,19 @@ class FetchTest(unittest.TestCase):
             self.assertEqual(fetcher.get("a"), "rendered page")
         self.assertEqual(len(fetcher.calls), 3)
 
+    def test_stops_after_too_many_challenges_but_successes_count_them_down(self):
+        fetcher = self.fetcher("always")
+        fetcher.challenged_renders.update(["a", "b"])
+        with unittest.mock.patch("time.sleep"):
+            fetcher.get("a")  # challenge, challenge, page: 1 left
+            fetcher.get("c")  # page: 0 left
+            fetcher.get("b")  # challenge, challenge, page: 1 left
+            self.assertEqual(fetcher.challenges, 1)
+            fetcher._request = lambda url, wait_ms=0: (200, "<title>Making sure you&#39;re not a bot!</title>")
+            with self.assertRaises(Blocked):
+                fetcher.get("d")
+        self.assertEqual(fetcher.challenges, 5)
+
     def test_never_render_stops_on_a_bot_challenge(self):
         with self.assertRaises(Blocked):
             self.fetcher("never").get("a")
