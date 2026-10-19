@@ -24,6 +24,14 @@ def load_users(directory):
                        dtype={"user_id": np.int32, "slug": str, "name": str}).set_index("user_id")
 
 
+def load_genres(directory):
+    """Written by `python3 -m ml.genres`."""
+    path = os.path.join(directory, "genres.csv.gz")
+    if not os.path.exists(path):
+        raise SystemExit(f"{path} not found; download genres first: python3 -m ml.genres --data {directory}")
+    return pd.read_csv(path, dtype={"film_id": np.int32, "genre": str})
+
+
 def csfd_url(film_id, slug, parent_id):
     parent = f"{int(parent_id)}/" if not pd.isna(parent_id) else ""
     return f"https://www.csfd.cz/film/{parent}{film_id}-{slug}/prehled/"

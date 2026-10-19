@@ -68,6 +68,10 @@ The log goes to `~/logs/csfd-crawl.log`.
    python3 -m ml.recommend --data ~/csfd-data --model model.npz --user 63015
    ```
 
+Genres aren't on the ratings pages, so they come from Wikidata, which links ~330 000 items to ČSFD IDs:
+`python3 -m ml.genres --data ~/csfd-data` writes `genres.csv.gz` (20 broad genres: scifi, fantasy, horor, thriller,
+krimi, akcni, komedie, drama, …, see `ml/genres.py`), then `ml.recommend … --genre scifi` (or `scifi,fantasy`).
+
 `ml.train` holds out 5 % of the ratings and prints the error on them (RMSE in stars) after every epoch, next to the
 baseline of predicting the mean for everyone; it stops when the error stops improving. `ml.recommend` computes the
 user's taste vector from their ratings against the film vectors (the same calculation the web page will do), so it

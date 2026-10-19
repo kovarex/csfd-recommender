@@ -13,7 +13,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from .data import csfd_url, load_films, load_ratings
+from .data import csfd_url, load_films, load_genres, load_ratings
 
 # Seasons and episodes have their own ratings on ČSFD, but recommending them next to whole films isn't useful.
 DEFAULT_EXCLUDED_KINDS = "série,epizoda,hudební videoklip"
@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--top", type=int, default=30)
     parser.add_argument("--min-ratings", type=int, default=100, help="only films with at least this many ratings")
     parser.add_argument("--exclude-kinds", default=DEFAULT_EXCLUDED_KINDS)
+    parser.add_argument("--genre", help="only these genres, comma separated (e.g. scifi,fantasy; needs ml.genres)")
     args = parser.parse_args()
 
     model = dict(np.load(args.model))
@@ -61,6 +62,12 @@ def main():
     excluded = set(filter(None, args.exclude_kinds.split(",")))
     kinds = films["kind"].reindex(model["film_ids"]).to_numpy()
     candidates &= ~np.isin(kinds, list(excluded))
+    if args.genre:
+        genres = load_genres(args.data)
+        wanted = genres[genres["genre"].isin(args.genre.split(","))]["film_id"]
+        in_genre = np.isin(model["film_ids"], wanted.to_numpy())
+        print(f"{in_genre.sum():,} films the model knows are {args.genre} (genres from Wikidata)")
+        candidates &= in_genre
 
     best = np.argsort(-np.where(candidates, predicted, -np.inf))[:args.top]
     for i in best:
