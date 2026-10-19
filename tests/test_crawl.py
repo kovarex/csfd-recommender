@@ -1,6 +1,7 @@
 import configparser
 import os
 import unittest
+import unittest.mock
 from datetime import date
 
 import pymysql
@@ -114,9 +115,15 @@ class FetchTest(unittest.TestCase):
         fetcher = ScrapeDoFetcher("token", rate=1000, render=render)
         fetcher.calls = []
 
-        def request(url):
+        def request(url, wait_ms=0):
             fetcher.calls.append(fetcher.rendering)
-            return 200, "rendered page" if fetcher.rendering else "<title>Making sure you&#39;re not a bot!</title>"
+            if fetcher.rendering and url not in fetcher.challenged_renders:
+                return 200, "rendered page"
+            if wait_ms:
+                fetcher.challenged_renders.discard(url)  # Waiting longer solves the challenge on the next try.
+            return 200, "<title>Making sure you&#39;re not a bot!</title>"
+
+        fetcher.challenged_renders = set()
 
         fetcher._request = request
         return fetcher
@@ -126,6 +133,13 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(fetcher.get("a"), "rendered page")
         self.assertEqual(fetcher.get("b"), "rendered page")
         self.assertEqual(fetcher.calls, [False, True, True])
+
+    def test_retries_a_render_that_came_back_with_the_challenge(self):
+        fetcher = self.fetcher("always")
+        fetcher.challenged_renders.add("a")
+        with unittest.mock.patch("time.sleep"):
+            self.assertEqual(fetcher.get("a"), "rendered page")
+        self.assertEqual(len(fetcher.calls), 3)
 
     def test_never_render_stops_on_a_bot_challenge(self):
         with self.assertRaises(Blocked):

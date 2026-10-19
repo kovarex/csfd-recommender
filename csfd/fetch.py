@@ -75,7 +75,8 @@ class ScrapeDoFetcher:
                 time.sleep(5 * attempt)
             self.limiter.wait()
             try:
-                status, body = self._request(url)
+                # A rendered page sometimes comes back before the browser solved the challenge; wait longer on a retry.
+                status, body = self._request(url, wait_ms=3000 * attempt if self.rendering else 0)
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 last_error = e
                 continue
@@ -84,7 +85,10 @@ class ScrapeDoFetcher:
             if status == 200:
                 if not is_challenge(body):
                     return body
-                if self.rendering or self.render_mode != "auto":
+                if self.rendering:
+                    last_error = Blocked(url)
+                    continue
+                if self.render_mode != "auto":
                     raise Blocked(url)
                 with self.lock:
                     if not self.rendering:
@@ -94,12 +98,16 @@ class ScrapeDoFetcher:
             last_error = FetchError(f"HTTP {status} for {url}")
             if status in (401, 403):
                 break
+        if isinstance(last_error, Blocked):
+            raise last_error
         raise FetchError(f"Giving up on {url}: {last_error}")
 
-    def _request(self, url):
+    def _request(self, url, wait_ms=0):
         params = {"token": self.token, "url": url, "geoCode": "cz"}
         if self.rendering:
             params["render"] = "true"
+        if wait_ms:
+            params["customWait"] = str(wait_ms)
         query = urllib.parse.urlencode(params)
         request = urllib.request.Request(f"{API_URL}?{query}")
         try:
