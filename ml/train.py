@@ -67,6 +67,21 @@ def rmse(model, users, films, stars, batch):
     return math.sqrt(total / max(1, len(stars)))
 
 
+def print_baselines(mean, train_users, train_films, train_stars, test_users, test_films, test_stars, users, films,
+                    shrink=5):
+    """Errors of simple predictions to compare the model with. Averages are pulled towards the overall mean as if
+    there were `shrink` extra average ratings, so a film with two ratings doesn't get an extreme average."""
+    error = lambda prediction: math.sqrt(((np.clip(prediction, 0, 5) - test_stars) ** 2).mean())
+    print(f"Baseline, everyone gets the overall mean {mean:.2f}: RMSE {error(np.full(len(test_stars), mean)):.4f}")
+    film_bias = (np.bincount(train_films, train_stars - mean, films)
+                 / (np.bincount(train_films, minlength=films) + shrink))
+    print(f"Baseline, the film's average rating: RMSE {error(mean + film_bias[test_films]):.4f}")
+    residual = train_stars - mean - film_bias[train_films]
+    user_bias = np.bincount(train_users, residual, users) / (np.bincount(train_users, minlength=users) + shrink)
+    print(f"Baseline, the film's average adjusted by how strict the user is: "
+          f"RMSE {error(mean + film_bias[test_films] + user_bias[test_users]):.4f}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data", default=os.path.expanduser("~/csfd-data"), help="directory with the CSV export")
@@ -103,7 +118,8 @@ def main():
     test_users, test_films, test_stars = (to_tensor(a[held_out]) for a in (users, films, stars))
 
     mean = float(train_stars.mean())
-    print(f"Baseline (everyone gets the mean {mean:.2f}): RMSE {math.sqrt(((test_stars - mean) ** 2).mean()):.4f}")
+    print_baselines(mean, users[~held_out], films[~held_out], stars[~held_out], users[held_out], films[held_out],
+                    stars[held_out], len(user_ids), len(film_ids))
     model = Model(len(user_ids), len(film_ids), args.factors, mean).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
