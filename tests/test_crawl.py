@@ -9,7 +9,7 @@ import pymysql
 from csfd import db
 from csfd.crawl import Crawler
 from csfd.fetch import Blocked, ChallengeNotSolved, NotFound, ScrapeDoFetcher
-from csfd.parse import NotRatingsPage, parse_ratings_page
+from csfd.parse import NotRatingsPage, Rating, RatingsPage, parse_ratings_page
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -253,6 +253,13 @@ class CrawlTest(unittest.TestCase):
 
         self.assertEqual(write(self.connection), "saved")
         self.assertEqual(len(attempts), 2)
+
+    def test_stores_a_film_with_a_very_long_slug(self):
+        db.create_schema(self.connection)
+        db.add_users(self.connection, [1])
+        rating = Rating(10, None, "x" * 600, "Long", 2000, "film", 4, date(2020, 1, 1))
+        db.save_page(self.connection, 1, RatingsPage(1, "u", "U", 1, [rating]), 1)
+        self.assertEqual(self.query("SELECT LENGTH(slug) FROM films WHERE id=10"), ((600,),))
 
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}

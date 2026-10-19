@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS films (
   id INT UNSIGNED NOT NULL PRIMARY KEY,
   -- For an episode or a season, the series it belongs to.
   parent_id INT UNSIGNED NULL,
-  slug VARCHAR(200) NOT NULL,
+  slug VARCHAR(1000) NOT NULL,
   title VARCHAR(300) NOT NULL,
   year SMALLINT UNSIGNED NULL,
   kind VARCHAR(40) NOT NULL

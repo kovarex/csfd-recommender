@@ -87,9 +87,21 @@ EXTRA_INDEXES = [
 ]
 
 
+# Columns widened after the first deployment: (table, column, length, ALTER statement).
+WIDENED_COLUMNS = [
+    ("films", "slug", 1000, "ALTER TABLE films MODIFY slug VARCHAR(1000) NOT NULL"),
+]
+
+
 @reconnecting
 def ensure_indexes(connection):
     with connection.cursor() as cursor:
+        for table, column, length, ddl in WIDENED_COLUMNS:
+            cursor.execute("SELECT character_maximum_length FROM information_schema.columns WHERE "
+                           "table_schema=DATABASE() AND table_name=%s AND column_name=%s", (table, column))
+            row = cursor.fetchone()
+            if row and row[0] < length:
+                cursor.execute(ddl)
         for table, name, ddl in EXTRA_INDEXES:
             cursor.execute("SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() "
                            "AND table_name=%s AND index_name=%s LIMIT 1", (table, name))
@@ -171,7 +183,7 @@ def save_page(connection, user_id, page, page_number):
                 "INSERT INTO films (id, parent_id, slug, title, year, kind) VALUES (%s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE parent_id=VALUES(parent_id), slug=VALUES(slug), title=VALUES(title), "
                 "year=VALUES(year), kind=VALUES(kind)",
-                [(r.film_id, r.parent_id, r.slug, r.title[:300], r.year, r.kind[:40]) for r in ratings],
+                [(r.film_id, r.parent_id, r.slug[:1000], r.title[:300], r.year, r.kind[:40]) for r in ratings],
             )
             cursor.executemany(
                 "INSERT INTO ratings (user_id, film_id, stars, rated_on) VALUES (%s, %s, %s, %s) "
@@ -181,7 +193,8 @@ def save_page(connection, user_id, page, page_number):
         cursor.execute(
             "UPDATE users SET slug=COALESCE(%s, slug), name=COALESCE(%s, name), page_count=%s, pages_done=%s "
             "WHERE id=%s",
-            (page.user_slug, page.user_name, page.page_count, page_number, user_id),
+            (page.user_slug and page.user_slug[:100], page.user_name and page.user_name[:100], page.page_count, page_number,
+             user_id),
         )
 
 
