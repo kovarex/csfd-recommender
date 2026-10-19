@@ -40,6 +40,9 @@ def main():
     parser.add_argument("--min-ratings", type=int, default=100, help="only films with at least this many ratings")
     parser.add_argument("--exclude-kinds", default=DEFAULT_EXCLUDED_KINDS)
     parser.add_argument("--genre", help="only these genres, comma separated (e.g. scifi,fantasy; needs ml.genres)")
+    parser.add_argument("--sort", choices=["best", "above", "below"], default="best",
+                        help="best: highest predicted rating for you; above/below: where your predicted rating is most "
+                             "above/below the prediction for an average viewer")
     args = parser.parse_args()
 
     model = dict(np.load(args.model))
@@ -56,6 +59,11 @@ def main():
     print(f"User {args.user}: {len(mine)} ratings, {len(known)} of them on films the model knows")
 
     predicted = model["mean"] + bias + model["film_bias"] + model["film_vectors"] @ vector
+    # The model's prediction for an average viewer: the average taste vector and bias of all trained users.
+    average = (model["mean"] + model["user_bias"].mean() + model["film_bias"]
+               + model["film_vectors"] @ model["user_vectors"].mean(0))
+    clip = lambda a: np.clip(a, 0, 5)
+    difference = clip(predicted) - clip(average)
     candidates = np.ones(len(predicted), bool)
     candidates[positions] = False
     candidates &= model["film_counts"] >= args.min_ratings
@@ -69,11 +77,14 @@ def main():
         print(f"{in_genre.sum():,} films the model knows are {args.genre} (genres from Wikidata)")
         candidates &= in_genre
 
-    best = np.argsort(-np.where(candidates, predicted, -np.inf))[:args.top]
+    score = {"best": predicted, "above": difference, "below": -difference}[args.sort]
+    best = np.argsort(-np.where(candidates, score, -np.inf))[:args.top]
+    print("ty  průměr  rozdíl")
     for i in best:
         film = films.loc[model["film_ids"][i]]
         year = f" ({film['year']})" if not pd.isna(film["year"]) else ""
-        print(f"{min(predicted[i], 5):4.2f} ★  {film['title']}{year}  [{film['kind']}, {model['film_counts'][i]} hodnocení]"
+        print(f"{clip(predicted[i]):4.2f}  {clip(average[i]):4.2f}  {difference[i]:+5.2f}  {film['title']}{year}"
+              f"  [{film['kind']}, {model['film_counts'][i]} hodnocení]"
               f"  {csfd_url(model['film_ids'][i], film['slug'], film['parent_id'])}")
 
 

@@ -76,7 +76,7 @@ krimi, akcni, komedie, drama, …, see `ml/genres.py`), then `ml.recommend … -
 baseline of predicting the mean for everyone; it stops when the error stops improving. `ml.recommend` computes the
 user's taste vector from their ratings against the film vectors (the same calculation the web page will do), so it
 works for any user in the export. Options: `--factors`, `--reg`, `--lr`, `--epochs` (train); `--min-ratings`,
-`--exclude-kinds`, `--top` (recommend).
+`--exclude-kinds`, `--top`, `--sort best|above|below` (recommend; above/below sort by how much the prediction for you differs from the prediction for an average viewer).
 
 ## Tests
 
