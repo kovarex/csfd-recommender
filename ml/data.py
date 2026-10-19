@@ -25,10 +25,10 @@ def load_users(directory):
 
 
 def load_genres(directory):
-    """Written by `python3 -m ml.genres`."""
+    """Part of the export (from the film_genres table)."""
     path = os.path.join(directory, "genres.csv.gz")
     if not os.path.exists(path):
-        raise SystemExit(f"{path} not found; download genres first: python3 -m ml.genres --data {directory}")
+        raise SystemExit(f"{path} not found; export again on NFS (genres are downloaded there weekly)")
     return pd.read_csv(path, dtype={"film_id": np.int32, "genre": str})
 
 

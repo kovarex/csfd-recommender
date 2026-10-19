@@ -3,6 +3,12 @@
 
 const STATUS_NAMES = [0 => 'čeká', 1 => 'stahuje se', 2 => 'hotovo', 3 => 'neexistuje', 4 => 'chyba'];
 const PAGE_SIZE = 100;
+// Genre keys in the film_genres table (csfd/genres.py) and their names.
+const GENRE_NAMES = ['scifi' => 'sci-fi', 'fantasy' => 'fantasy', 'horor' => 'horor', 'thriller' => 'thriller',
+  'krimi' => 'krimi', 'akcni' => 'akční', 'dobrodruzny' => 'dobrodružný', 'komedie' => 'komedie', 'drama' => 'drama',
+  'romanticky' => 'romantický', 'animovany' => 'animovaný', 'anime' => 'anime', 'dokumentarni' => 'dokumentární',
+  'valecny' => 'válečný', 'western' => 'western', 'historicky' => 'historický', 'zivotopisny' => 'životopisný',
+  'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní'];
 
 function config(): array
 {

@@ -132,32 +132,52 @@ function user_page(int $id, int $offset): void
   echo pager($total);
 }
 
+/** Kinds for the film list's filter, cached by the film stats refresh; counted from films before the first one. */
+function film_kinds(): array
+{
+  $cached = value("SELECT value FROM crawl_state WHERE name='film_kinds'");
+  if ($cached !== null)
+    return json_decode($cached, true);
+  return array_column(query('SELECT kind, COUNT(*) AS c FROM films GROUP BY kind ORDER BY c DESC LIMIT 15'), 'kind');
+}
+
 function films_page(int $offset): void
 {
   header_html('Filmy');
   $sort = ($_GET['sort'] ?? '') === 'average' ? 'average' : 'count';
   $min = max(1, (int)($_GET['min'] ?? ($sort === 'average' ? 100 : 1)));
   $kind = $_GET['kind'] ?? 'film';
-  $where = 's.rating_count >= ?' . ($kind !== '' ? ' AND f.kind = ?' : '');
+  $genre = isset(GENRE_NAMES[$_GET['genre'] ?? '']) ? $_GET['genre'] : '';
+  $where = 's.rating_count >= ?' . ($kind !== '' ? ' AND s.kind = ?' : '');
   $params = $kind !== '' ? [$min, $kind] : [$min];
+  if ($genre !== '')
+  {
+    $where .= ' AND s.film_id IN (SELECT film_id FROM film_genres WHERE genre = ?)';
+    $params[] = $genre;
+  }
   ?>
   <form class="filters">
     <input type="hidden" name="view" value="films">
     Řadit <select name="sort"><option value="count">podle počtu hodnocení</option>
       <option value="average" <?= $sort === 'average' ? 'selected' : '' ?>>podle průměru</option></select>
     typ <select name="kind"><option value="">vše</option>
-      <?php foreach (query('SELECT kind, COUNT(*) AS c FROM films GROUP BY kind ORDER BY c DESC LIMIT 15') as $k): ?>
-        <option <?= $k['kind'] === $kind ? 'selected' : '' ?>><?= h($k['kind']) ?></option>
+      <?php foreach (film_kinds() as $k): ?>
+        <option <?= $k === $kind ? 'selected' : '' ?>><?= h($k) ?></option>
+      <?php endforeach ?></select>
+    žánr <select name="genre"><option value="">vše</option>
+      <?php foreach (GENRE_NAMES as $key => $name): ?>
+        <option value="<?= h($key) ?>" <?= $key === $genre ? 'selected' : '' ?>><?= h($name) ?></option>
       <?php endforeach ?></select>
     min. hodnocení <input name="min" type="number" value="<?= $min ?>" min="1">
     <button>Zobrazit</button>
   </form>
   <?php
-  $total = (int)value("SELECT COUNT(*) FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $where", $params);
-  if (!value('SELECT COUNT(*) FROM film_stats'))
+  $total = (int)value("SELECT COUNT(*) FROM film_stats s WHERE $where", $params);
+  if (!value('SELECT 1 FROM film_stats LIMIT 1'))
     echo '<p class="note">Statistiky filmů se ještě nepřepočítaly, objeví se po dalším běhu scraperu.</p>';
   echo pager($total);
-  $order = $sort === 'average' ? 's.average DESC, s.rating_count DESC' : 's.rating_count DESC, s.average DESC';
+  // Ties are broken by the ID, which is part of every index, so the order is read from an index without sorting.
+  $order = $sort === 'average' ? 's.average DESC, s.film_id DESC' : 's.rating_count DESC, s.film_id DESC';
   $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average
                  FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $where
                  ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
@@ -188,7 +208,9 @@ function film_page(int $id, int $offset): void
   $sum = 0;
   foreach ($distribution as $d)
     $sum += $d['stars'] * $d['count'];
-  echo '<p>' . h($film['kind']) . ($film['parent_title'] ? ' · patří k <a href="' . h(url(['view' => 'film', 'id' => $film['parent_id']])) . '">' . h($film['parent_title']) . '</a>' : '') .
+  $genres = array_map(fn($g) => h(GENRE_NAMES[$g['genre']] ?? $g['genre']),
+                     query('SELECT genre FROM film_genres WHERE film_id=? ORDER BY genre', [$id]));
+  echo '<p>' . h($film['kind']) . ($genres ? ' · ' . implode(', ', $genres) : '') . ($film['parent_title'] ? ' · patří k <a href="' . h(url(['view' => 'film', 'id' => $film['parent_id']])) . '">' . h($film['parent_title']) . '</a>' : '') .
        ' · ' . n($total) . ' hodnocení' . ($total ? ' · ' . percent($sum / $total) : '') .
        ' · <a href="' . h($csfd) . '">na ČSFD</a></p>';
   distribution($distribution);

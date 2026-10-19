@@ -2,16 +2,12 @@
 
 ČSFD's own genres are only on each film's page (a request per film); Wikidata has them for free for about 240 000 of
 those films. Its genres are fine-grained ("science fiction comedy", "space western"), so each is mapped to the broad
-genres below through Wikidata's "subclass of" links. Writes genres.csv.gz (film_id, genre) next to the export.
-
-    python3 -m ml.genres --data ~/csfd-data
+genres below through Wikidata's "subclass of" links. `python3 -m csfd.crawl genres` stores them in the film_genres
+table (run-crawl.sh refreshes it weekly); the export includes them as genres.csv.gz.
 """
 
-import argparse
 import csv
-import gzip
 import io
-import os
 import re
 import urllib.parse
 import urllib.request
@@ -90,23 +86,3 @@ def download():
     roots = {root: name for name, items in GENRES.items() for root in items}
     return {film: {roots[a] for g in genres for a in ancestors_of(g) if a in roots}
             for film, genres in film_genres.items()}
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--data", default=os.path.expanduser("~/csfd-data"))
-    args = parser.parse_args()
-    film_genres = download()
-    path = os.path.join(args.data, "genres.csv.gz")
-    with gzip.open(path, "wt", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["film_id", "genre"])
-        for film, genres in sorted(film_genres.items()):
-            writer.writerows((film, genre) for genre in sorted(genres))
-    counts = {name: sum(name in g for g in film_genres.values()) for name in GENRES}
-    print(f"Saved genres of {sum(bool(g) for g in film_genres.values()):,} films to {path}")
-    print(", ".join(f"{name} {count:,}" for name, count in counts.items()))
-
-
-if __name__ == "__main__":
-    main()

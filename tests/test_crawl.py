@@ -185,7 +185,7 @@ class CrawlTest(unittest.TestCase):
         self.config = test_config()
         self.connection = db.connect(self.config)
         with self.connection.cursor() as cursor:
-            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs"):
+            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres"):
                 cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     def tearDown(self):
@@ -273,6 +273,32 @@ class CrawlTest(unittest.TestCase):
             export.export(self.connection, directory)
             with gzip.open(os.path.join(directory, "ratings.csv.gz"), "rt") as f:
                 self.assertEqual(sorted(csv.reader(f))[:-1], [["1", "100", "5"], ["450", "101", "0"]])
+
+    def test_save_genres_replaces_the_table(self):
+        db.create_schema(self.connection)
+        db.save_genres(self.connection, {1: {"scifi", "drama"}, 2: {"komedie"}})
+        db.save_genres(self.connection, {1: {"scifi"}, 3: set()})
+        self.assertEqual(self.query("SELECT film_id, genre FROM film_genres"), ((1, "scifi"),))
+
+    def test_film_stats_copy_the_kind_and_cache_the_kinds(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("INSERT INTO films (id, slug, title, kind) VALUES (1, 'a', 'A', 'film'), (2, 'b', 'B', 'série')")
+            cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (5, 1, 4), (6, 1, 2), (5, 2, 3)")
+        db.refresh_film_stats(self.connection)
+        self.assertEqual(self.query("SELECT film_id, rating_count, kind FROM film_stats ORDER BY film_id"),
+                         ((1, 2, "film"), (2, 1, "série")))
+        self.assertEqual(self.query("SELECT value FROM crawl_state WHERE name='film_kinds'"), (('["film", "série"]',),))
+
+    def test_migration_adds_the_kind_to_old_film_stats(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE film_stats DROP KEY kind_count, DROP KEY kind_average, DROP KEY average, "
+                           "DROP COLUMN kind")
+            cursor.execute("INSERT INTO films (id, slug, title, kind) VALUES (1, 'a', 'A', 'film')")
+            cursor.execute("INSERT INTO film_stats (film_id, rating_count, average) VALUES (1, 3, 4.0)")
+        db.create_schema(self.connection)
+        self.assertEqual(self.query("SELECT kind FROM film_stats"), (("film",),))
 
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}

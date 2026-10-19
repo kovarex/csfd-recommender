@@ -18,6 +18,8 @@ TABLES = {
     "films.csv.gz": ("film_id,parent_id,slug,title,year,kind",
                      "SELECT id, parent_id, slug, title, year, kind FROM films WHERE id BETWEEN %s AND %s",
                      "id", "films", 20000),
+    "genres.csv.gz": ("film_id,genre", "SELECT film_id, genre FROM film_genres WHERE film_id BETWEEN %s AND %s",
+                      "film_id", "film_genres", 20000),
     "users.csv.gz": ("user_id,slug,name,rating_count",
                      "SELECT id, slug, name, rating_count FROM users WHERE status=2 AND id BETWEEN %s AND %s",
                      "id", "users", 50000),

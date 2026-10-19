@@ -1,6 +1,7 @@
 """MariaDB access."""
 
 import functools
+import json
 import logging
 import os
 import time
@@ -84,6 +85,10 @@ def create_schema(connection):
 EXTRA_INDEXES = [
     ("users", "rating_count", "ALTER TABLE users ADD KEY rating_count (rating_count)"),
     ("users", "name", "ALTER TABLE users ADD KEY name (name)"),
+    ("film_stats", "kind_count", ["ALTER TABLE film_stats ADD COLUMN kind VARCHAR(40) NOT NULL DEFAULT '', "
+                                  "ADD KEY kind_count (kind, rating_count), ADD KEY kind_average (kind, average), "
+                                  "ADD KEY average (average)",
+                                  "UPDATE film_stats s JOIN films f ON f.id = s.film_id SET s.kind = f.kind"]),
 ]
 
 
@@ -106,7 +111,8 @@ def ensure_indexes(connection):
             cursor.execute("SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() "
                            "AND table_name=%s AND index_name=%s LIMIT 1", (table, name))
             if not cursor.fetchone():
-                cursor.execute(ddl)
+                for statement in [ddl] if isinstance(ddl, str) else ddl:
+                    cursor.execute(statement)
 
 
 @reconnecting
@@ -115,11 +121,32 @@ def refresh_film_stats(connection):
     with connection.cursor() as cursor:
         cursor.execute("DROP TABLE IF EXISTS film_stats_new")
         cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
-        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, average) "
-                       "SELECT film_id, COUNT(*), AVG(stars) FROM ratings GROUP BY film_id")
+        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, average, kind) "
+                       "SELECT s.film_id, s.c, s.a, f.kind FROM (SELECT film_id, COUNT(*) AS c, AVG(stars) AS a "
+                       "FROM ratings GROUP BY film_id) s JOIN films f ON f.id = s.film_id")
+        # The kinds for the film list's filter, so the page doesn't count them on every load.
+        cursor.execute("SELECT kind, COUNT(*) FROM film_stats_new GROUP BY kind ORDER BY COUNT(*) DESC, kind LIMIT 15")
+        kinds = [kind for kind, _ in cursor.fetchall()]
+        while len(json.dumps(kinds, ensure_ascii=False)) > 255:  # crawl_state.value is VARCHAR(255)
+            kinds.pop()
         cursor.execute("RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
         cursor.execute("DROP TABLE film_stats_old")
+    set_state(connection, "film_kinds", json.dumps(kinds, ensure_ascii=False))
     set_state(connection, "film_stats_at", int(time.time()))
+
+
+@reconnecting
+def save_genres(connection, film_genres):
+    """Replaces film_genres with {film ID: set of genres}, swapping the new table in atomically."""
+    rows = [(film, genre) for film, genres in film_genres.items() for genre in genres]
+    with connection.cursor() as cursor:
+        cursor.execute("DROP TABLE IF EXISTS film_genres_new")
+        cursor.execute("CREATE TABLE film_genres_new LIKE film_genres")
+        for start in range(0, len(rows), 10000):
+            cursor.executemany("INSERT INTO film_genres_new (film_id, genre) VALUES (%s, %s)", rows[start:start + 10000])
+        cursor.execute("RENAME TABLE film_genres TO film_genres_old, film_genres_new TO film_genres")
+        cursor.execute("DROP TABLE film_genres_old")
+    set_state(connection, "genres_at", int(time.time()))
 
 
 @reconnecting

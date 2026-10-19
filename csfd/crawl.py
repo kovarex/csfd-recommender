@@ -11,7 +11,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import db, export
+from . import db, export, genres
 from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, ratings_url
 from .parse import NotRatingsPage, parse_ratings_page
 
@@ -171,6 +171,9 @@ def main():
     add = sub.add_parser("add", help="queue users (numeric IDs) to be scraped first, e.g. yourself")
     add.add_argument("user_ids", type=int, nargs="+")
     sub.add_parser("stats", help="show what is in the database")
+    genres_parser = sub.add_parser("genres", help="download film genres from Wikidata into the film_genres table")
+    genres_parser.add_argument("--max-age-hours", type=float, default=0,
+                               help="only download when the last download is older than this")
     export_parser = sub.add_parser("export", help="write ratings, films and users to gzipped CSV for training")
     export_parser.add_argument("--dir", default=os.path.expanduser("~/exports"))
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
@@ -202,6 +205,14 @@ def main():
         if time.time() - last >= args.max_age_hours * 3600:
             db.refresh_film_stats(connection)
             print("Film stats rebuilt.")
+    elif args.command == "genres":
+        connection = db.connect(config)
+        db.create_schema(connection)
+        last = int(db.get_state(connection, "genres_at", 0))
+        if time.time() - last >= args.max_age_hours * 3600:
+            film_genres = genres.download()
+            db.save_genres(connection, film_genres)
+            print(f"Genres of {len(film_genres)} films saved.")
     elif args.command == "export":
         export.export(db.connect(config), args.dir)
     elif args.command == "stats":

@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS ratings (
   KEY film_id (film_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Broad genres from Wikidata (csfd/genres.py), also for films we have no ratings of yet.
+CREATE TABLE IF NOT EXISTS film_genres (
+  film_id INT UNSIGNED NOT NULL,
+  genre VARCHAR(20) NOT NULL,
+  PRIMARY KEY (film_id, genre),
+  KEY genre (genre, film_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS crawl_state (
   name VARCHAR(50) NOT NULL PRIMARY KEY,
   value VARCHAR(255) NOT NULL
@@ -59,5 +67,10 @@ CREATE TABLE IF NOT EXISTS film_stats (
   rating_count INT UNSIGNED NOT NULL,
   -- Average of stars 0-5.
   average DECIMAL(4,3) NOT NULL,
-  KEY rating_count (rating_count)
+  -- Copied from films, so the film list can filter and sort by an index without joining films.
+  kind VARCHAR(40) NOT NULL DEFAULT '',
+  KEY rating_count (rating_count),
+  KEY average (average),
+  KEY kind_count (kind, rating_count),
+  KEY kind_average (kind, average)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

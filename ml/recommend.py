@@ -39,7 +39,7 @@ def main():
     parser.add_argument("--top", type=int, default=30)
     parser.add_argument("--min-ratings", type=int, default=100, help="only films with at least this many ratings")
     parser.add_argument("--exclude-kinds", default=DEFAULT_EXCLUDED_KINDS)
-    parser.add_argument("--genre", help="only these genres, comma separated (e.g. scifi,fantasy; needs ml.genres)")
+    parser.add_argument("--genre", help="only these genres, comma separated (e.g. scifi,fantasy)")
     parser.add_argument("--sort", choices=["best", "above", "below"], default="best",
                         help="best: highest predicted rating for you; above/below: where your predicted rating is most "
                              "above/below the prediction for an average viewer")
