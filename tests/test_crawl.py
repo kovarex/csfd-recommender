@@ -8,7 +8,7 @@ import pymysql
 
 from csfd import db
 from csfd.crawl import Crawler
-from csfd.fetch import Blocked, NotFound, ScrapeDoFetcher
+from csfd.fetch import Blocked, ChallengeNotSolved, NotFound, ScrapeDoFetcher
 from csfd.parse import NotRatingsPage, parse_ratings_page
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -141,18 +141,27 @@ class FetchTest(unittest.TestCase):
             self.assertEqual(fetcher.get("a"), "rendered page")
         self.assertEqual(len(fetcher.calls), 3)
 
-    def test_stops_after_too_many_challenges_but_successes_count_them_down(self):
+    def test_gives_up_on_a_page_after_ten_attempts_and_stops_after_twenty_failures(self):
         fetcher = self.fetcher("always")
-        fetcher.challenged_renders.update(["a", "b"])
+        always_challenged = lambda url, wait_ms=0: (fetcher.calls.append(wait_ms),
+                                                     (200, "<title>Making sure you&#39;re not a bot!</title>"))[1]
+        rendered = fetcher._request
         with unittest.mock.patch("time.sleep"):
-            fetcher.get("a")  # challenge, challenge, page: 1 left
-            fetcher.get("c")  # page: 0 left
-            fetcher.get("b")  # challenge, challenge, page: 1 left
-            self.assertEqual(fetcher.challenges, 1)
-            fetcher._request = lambda url, wait_ms=0: (200, "<title>Making sure you&#39;re not a bot!</title>")
+            fetcher._request = always_challenged
+            with self.assertRaises(ChallengeNotSolved):
+                fetcher.get("a")
+            self.assertEqual(fetcher.calls, [1500 * i for i in range(10)])  # Each attempt waits longer.
+            self.assertEqual(fetcher.challenges, 10)
+            fetcher._request = rendered
+            fetcher.get("b")  # A page that comes through takes five off.
+            self.assertEqual(fetcher.challenges, 5)
+            fetcher._request = always_challenged
+            fetcher.calls = []
+            with self.assertRaises(ChallengeNotSolved):
+                fetcher.get("c")
             with self.assertRaises(Blocked):
                 fetcher.get("d")
-        self.assertEqual(fetcher.challenges, 5)
+            self.assertEqual(len(fetcher.calls), 15)
 
     def test_never_render_stops_on_a_bot_challenge(self):
         with self.assertRaises(Blocked):

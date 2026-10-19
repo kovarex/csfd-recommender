@@ -27,6 +27,10 @@ class Blocked(FetchError):
     """ČSFD served an anti-bot challenge instead of the page. Stops the run, so no credits are wasted."""
 
 
+class ChallengeNotSolved(FetchError):
+    """A rendered page kept showing the challenge after every attempt; the user is tried again later."""
+
+
 def ratings_url(user_id, page=1):
     return f"{BASE_URL}/uzivatel/{user_id}/hodnoceni/" + (f"?page={page}" if page > 1 else "")
 
@@ -56,16 +60,20 @@ class ScrapeDoFetcher:
     """render: "auto" switches to scrape.do's headless browser (5 credits a page instead of 1) for the rest of the
     run once ČSFD serves its Anubis bot challenge (on since 19 Oct 2026); "always" and "never" force the mode."""
 
-    def __init__(self, token, rate=2.0, timeout=90, retries=3, render="auto", max_challenges=5):
+    def __init__(self, token, rate=2.0, timeout=90, retries=3, render="auto", render_attempts=10, max_challenges=20,
+                 challenge_credit=5):
         self.token = token
         self.render_mode = render
         self.rendering = render == "always"
         self.limiter = RateLimiter(rate)
         self.timeout = timeout
         self.retries = retries
-        # Rendered pages that still show the challenge add one, pages that come through take one off; the run stops
-        # as blocked when it reaches max_challenges.
+        # Each rendered page that still shows the challenge adds one, each page that comes through takes
+        # challenge_credit off; the run stops as blocked when the count reaches max_challenges. A single page is given
+        # up (and its user tried again later) after render_attempts tries.
+        self.render_attempts = render_attempts
         self.max_challenges = max_challenges
+        self.challenge_credit = challenge_credit
         self.challenges = 0
         self.lock = threading.Lock()
         self.requests = 0
@@ -79,8 +87,8 @@ class ScrapeDoFetcher:
         while failures < self.retries:
             self.limiter.wait()
             try:
-                # A rendered page sometimes comes back before the browser solved the challenge; wait longer on a retry.
-                status, body = self._request(url, wait_ms=min(3000 * waits, 10000) if self.rendering else 0)
+                # A rendered page sometimes comes back before the browser solved the challenge; each retry waits longer.
+                status, body = self._request(url, wait_ms=1500 * waits if self.rendering else 0)
             except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 last_error = e
                 failures += 1
@@ -94,8 +102,11 @@ class ScrapeDoFetcher:
                     self._passed()
                     return body
                 if self.rendering:
-                    self._challenged(url)
                     waits += 1
+                    self._challenged(url, waits)
+                    log.info("Rendered page still shows the bot challenge (attempt %s of %s): %s", waits,
+                             self.render_attempts, url)
+                    time.sleep(waits)
                 elif self.render_mode == "auto":
                     with self.lock:
                         if not self.rendering:
@@ -111,17 +122,17 @@ class ScrapeDoFetcher:
             time.sleep(5 * failures)
         raise FetchError(f"Giving up on {url}: {last_error}")
 
-    def _challenged(self, url):
+    def _challenged(self, url, attempts):
         with self.lock:
             self.challenges += 1
             if self.challenges >= self.max_challenges:
                 raise Blocked(url)
-        log.info("Rendered page still shows the bot challenge (%s of %s), retrying", self.challenges,
-                 self.max_challenges)
+        if attempts >= self.render_attempts:
+            raise ChallengeNotSolved(url)
 
     def _passed(self):
         with self.lock:
-            self.challenges = max(0, self.challenges - 1)
+            self.challenges = max(0, self.challenges - self.challenge_credit)
 
     def _request(self, url, wait_ms=0):
         params = {"token": self.token, "url": url, "geoCode": "cz"}

@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import db
-from .fetch import Blocked, FetchError, NotFound, ScrapeDoFetcher, ratings_url
+from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, ratings_url
 from .parse import NotRatingsPage, parse_ratings_page
 
 DEFAULT_CONFIG = os.path.expanduser("~/csfd-config.ini")
@@ -130,6 +130,10 @@ class Crawler:
         except Blocked as e:
             db.release_user(connection, user_id)
             self.stop_reason = f"blocked by ČSFD at {e}"
+            return
+        except ChallengeNotSolved as e:
+            log.warning("User %s: %s still shows the bot challenge, will retry later", user_id, e)
+            db.release_user(connection, user_id)
             return
         except (FetchError, NotRatingsPage) as e:
             log.warning("User %s failed: %s", user_id, e)
