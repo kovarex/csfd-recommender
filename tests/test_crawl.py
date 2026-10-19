@@ -7,7 +7,7 @@ import pymysql
 
 from csfd import db
 from csfd.crawl import Crawler
-from csfd.fetch import Blocked, NotFound
+from csfd.fetch import Blocked, NotFound, ScrapeDoFetcher
 from csfd.parse import NotRatingsPage, parse_ratings_page
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -107,6 +107,29 @@ class ParseTest(unittest.TestCase):
     def test_other_page_is_rejected(self):
         with self.assertRaises(NotRatingsPage):
             parse_ratings_page(fixture("not-found.html"))
+
+
+class FetchTest(unittest.TestCase):
+    def fetcher(self, render):
+        fetcher = ScrapeDoFetcher("token", rate=1000, render=render)
+        fetcher.calls = []
+
+        def request(url):
+            fetcher.calls.append(fetcher.rendering)
+            return 200, "rendered page" if fetcher.rendering else "<title>Making sure you&#39;re not a bot!</title>"
+
+        fetcher._request = request
+        return fetcher
+
+    def test_switches_to_rendering_on_a_bot_challenge(self):
+        fetcher = self.fetcher("auto")
+        self.assertEqual(fetcher.get("a"), "rendered page")
+        self.assertEqual(fetcher.get("b"), "rendered page")
+        self.assertEqual(fetcher.calls, [False, True, True])
+
+    def test_never_render_stops_on_a_bot_challenge(self):
+        with self.assertRaises(Blocked):
+            self.fetcher("never").get("a")
 
 
 class CrawlTest(unittest.TestCase):

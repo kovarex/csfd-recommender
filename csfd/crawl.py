@@ -59,6 +59,8 @@ class Crawler:
                     future.result()
         finally:
             reason = self.stop_reason or "time limit"
+            if getattr(self.fetcher, "rendering", False):
+                reason += " (rendered in a browser)"
             db.finish_run(main, run_id, self.stats, self.fetcher, reason)
             log.info("Stopped (%s): %s users, %s ratings, %s requests, %s credits used, %s left", reason,
                      self.stats["users"], self.stats["ratings"], self.fetcher.requests,
@@ -178,7 +180,8 @@ def main():
             config["crawl"]["rate"] = str(args.rate)
         if args.workers:
             config["crawl"]["workers"] = str(args.workers)
-        fetcher = ScrapeDoFetcher(config["scrape_do"]["token"], rate=float(config["crawl"].get("rate", 2)))
+        fetcher = ScrapeDoFetcher(config["scrape_do"]["token"], rate=float(config["crawl"].get("rate", 2)),
+                                  render=config["crawl"].get("render", "auto"))
         Crawler(config, fetcher).run(args.minutes)
     elif args.command == "add":
         connection = db.connect(config)

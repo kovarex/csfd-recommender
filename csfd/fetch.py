@@ -1,5 +1,6 @@
 """Downloading ČSFD pages through scrape.do (https://scrape.do)."""
 
+import logging
 import threading
 import time
 import urllib.error
@@ -10,6 +11,8 @@ from .parse import is_not_found
 
 BASE_URL = "https://www.csfd.cz"
 API_URL = "https://api.scrape.do/"
+
+log = logging.getLogger("csfd")
 
 
 class NotFound(Exception):
@@ -45,9 +48,18 @@ class RateLimiter:
             time.sleep(wait_until - now)
 
 
+def is_challenge(body):
+    return "anubis_challenge" in body or "Making sure you&#39;re not a bot" in body
+
+
 class ScrapeDoFetcher:
-    def __init__(self, token, rate=2.0, timeout=90, retries=3):
+    """render: "auto" switches to scrape.do's headless browser (5 credits a page instead of 1) for the rest of the
+    run once ČSFD serves its Anubis bot challenge (on since 19 Oct 2026); "always" and "never" force the mode."""
+
+    def __init__(self, token, rate=2.0, timeout=90, retries=3, render="auto"):
         self.token = token
+        self.render_mode = render
+        self.rendering = render == "always"
         self.limiter = RateLimiter(rate)
         self.timeout = timeout
         self.retries = retries
@@ -70,16 +82,25 @@ class ScrapeDoFetcher:
             if status == 404 or (status == 200 and is_not_found(body)):
                 raise NotFound(url)
             if status == 200:
-                if "anubis_challenge" in body or "Making sure you&#39;re not a bot" in body:
+                if not is_challenge(body):
+                    return body
+                if self.rendering or self.render_mode != "auto":
                     raise Blocked(url)
-                return body
+                with self.lock:
+                    if not self.rendering:
+                        log.info("ČSFD serves a bot challenge, switching to rendering in a browser")
+                        self.rendering = True
+                return self.get(url)
             last_error = FetchError(f"HTTP {status} for {url}")
             if status in (401, 403):
                 break
         raise FetchError(f"Giving up on {url}: {last_error}")
 
     def _request(self, url):
-        query = urllib.parse.urlencode({"token": self.token, "url": url, "geoCode": "cz"})
+        params = {"token": self.token, "url": url, "geoCode": "cz"}
+        if self.rendering:
+            params["render"] = "true"
+        query = urllib.parse.urlencode(params)
         request = urllib.request.Request(f"{API_URL}?{query}")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
