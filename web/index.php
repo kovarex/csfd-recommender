@@ -31,6 +31,7 @@ function overview_page(): void
   $films = value('SELECT COUNT(*) FROM films');
   $credits = value('SELECT credits_remaining FROM crawl_runs WHERE credits_remaining IS NOT NULL ORDER BY id DESC LIMIT 1');
   $statsAt = value("SELECT value FROM crawl_state WHERE name='film_stats_at'");
+  $statsStartedAt = value("SELECT value FROM crawl_state WHERE name='film_stats_started_at'");
   ?>
   <div class="tiles">
     <div><b><?= n($ratings) ?></b>hodnocení</div>
@@ -55,7 +56,8 @@ function overview_page(): void
         <td class="num"><?= $r['credits_remaining'] === null ? '' : n($r['credits_remaining']) ?></td><td><?= h($r['stop_reason']) ?></td></tr>
     <?php endforeach ?>
   </table>
-  <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? h(local_time($statsAt)) . ', další přepočet po ' . h(local_time($statsAt + 4 * 3600)) : 'zatím ne' ?> (každé 4 hodiny, s nejbližším během).</p>
+  <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? h(local_time($statsAt)) . ', další přepočet po ' . h(local_time($statsAt + 4 * 3600)) : 'zatím ne' ?> (každé 4 hodiny, s nejbližším během).<?=
+    $statsStartedAt > $statsAt ? ' Přepočet spuštěný ' . h(local_time($statsStartedAt)) . ' zatím nedoběhl.' : '' ?></p>
   <?php
 }
 
