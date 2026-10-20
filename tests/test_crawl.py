@@ -3,6 +3,7 @@ import os
 import unittest
 import unittest.mock
 from datetime import date
+from decimal import Decimal
 
 import pymysql
 
@@ -285,9 +286,10 @@ class CrawlTest(unittest.TestCase):
         with self.connection.cursor() as cursor:
             cursor.execute("INSERT INTO films (id, slug, title, kind) VALUES (1, 'a', 'A', 'film'), (2, 'b', 'B', 'série')")
             cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (5, 1, 4), (6, 1, 2), (5, 2, 3)")
-        db.refresh_film_stats(self.connection)
-        self.assertEqual(self.query("SELECT film_id, rating_count, kind FROM film_stats ORDER BY film_id"),
-                         ((1, 2, "film"), (2, 1, "série")))
+        with unittest.mock.patch.object(db, "FILM_STATS_USER_STEP", 1):  # each user in their own chunk
+            db.refresh_film_stats(self.connection)
+        self.assertEqual(self.query("SELECT film_id, rating_count, average, kind FROM film_stats ORDER BY film_id"),
+                         ((1, 2, Decimal("3.000"), "film"), (2, 1, Decimal("3.000"), "série")))
         self.assertEqual(self.query("SELECT value FROM crawl_state WHERE name='film_kinds'"), (('["film", "série"]',),))
 
     def test_migration_adds_the_kind_to_old_film_stats(self):

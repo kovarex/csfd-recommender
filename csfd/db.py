@@ -115,24 +115,48 @@ def ensure_indexes(connection):
                     cursor.execute(statement)
 
 
+# Users per statement when rebuilding film_stats. The NFS database drops long-running queries, and one GROUP BY over
+# all ratings got too long once there were ~11 M of them.
+FILM_STATS_USER_STEP = 5000
+
+
 @reconnecting
-def refresh_film_stats(connection):
-    """Rebuilds film_stats from ratings and swaps it in atomically."""
+def add_film_stats_chunk(connection, low, high):
+    """Adds the ratings of users low..high to film_stats_new; a statement cut off by a lost connection is rolled
+    back, so retrying it is safe."""
     with connection.cursor() as cursor:
-        cursor.execute("DROP TABLE IF EXISTS film_stats_new")
-        cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
-        # One pass over ratings, then the kind by the films' primary key. Joining films in the same statement lets
-        # MariaDB run the GROUP BY once per film instead, which took longer than NFS allows a scheduled task.
-        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, average) "
-                       "SELECT film_id, COUNT(*), AVG(stars) FROM ratings GROUP BY film_id")
-        cursor.execute("UPDATE film_stats_new s JOIN films f ON f.id = s.film_id SET s.kind = f.kind")
-        # The kinds for the film list's filter, so the page doesn't count them on every load.
-        cursor.execute("SELECT kind, COUNT(*) FROM film_stats_new GROUP BY kind ORDER BY COUNT(*) DESC, kind LIMIT 15")
-        kinds = [kind for kind, _ in cursor.fetchall()]
-        while len(json.dumps(kinds, ensure_ascii=False)) > 255:  # crawl_state.value is VARCHAR(255)
-            kinds.pop()
-        cursor.execute("RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
-        cursor.execute("DROP TABLE film_stats_old")
+        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, star_sum, average) "
+                       "SELECT film_id, COUNT(*), SUM(stars), 0 FROM ratings WHERE user_id BETWEEN %s AND %s "
+                       "GROUP BY film_id ON DUPLICATE KEY UPDATE rating_count = rating_count + VALUES(rating_count), "
+                       "star_sum = star_sum + VALUES(star_sum)", (low, high))
+
+
+@reconnecting
+def run_statement(connection, sql):
+    with connection.cursor() as cursor:
+        cursor.execute(sql)
+        return cursor.fetchall()
+
+
+def refresh_film_stats(connection):
+    """Rebuilds film_stats from ratings in short statements and swaps it in atomically."""
+    run_statement(connection, "DROP TABLE IF EXISTS film_stats_new")
+    run_statement(connection, "CREATE TABLE film_stats_new LIKE film_stats")
+    run_statement(connection, "ALTER TABLE film_stats_new ADD COLUMN star_sum INT UNSIGNED NOT NULL DEFAULT 0")
+    (low, high), = run_statement(connection, "SELECT MIN(user_id), MAX(user_id) FROM ratings")
+    for start in range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP):
+        add_film_stats_chunk(connection, start, start + FILM_STATS_USER_STEP - 1)
+    run_statement(connection, "UPDATE film_stats_new SET average = star_sum / rating_count")
+    run_statement(connection, "ALTER TABLE film_stats_new DROP COLUMN star_sum")
+    # The kind by the films' primary key, separately: joining films into the aggregate lets MariaDB run it per film.
+    run_statement(connection, "UPDATE film_stats_new s JOIN films f ON f.id = s.film_id SET s.kind = f.kind")
+    # The kinds for the film list's filter, so the page doesn't count them on every load.
+    kinds = [kind for kind, _ in run_statement(
+        connection, "SELECT kind, COUNT(*) FROM film_stats_new GROUP BY kind ORDER BY COUNT(*) DESC, kind LIMIT 15")]
+    while len(json.dumps(kinds, ensure_ascii=False)) > 255:  # crawl_state.value is VARCHAR(255)
+        kinds.pop()
+    run_statement(connection, "RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
+    run_statement(connection, "DROP TABLE film_stats_old")
     set_state(connection, "film_kinds", json.dumps(kinds, ensure_ascii=False))
     set_state(connection, "film_stats_at", int(time.time()))
 
