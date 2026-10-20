@@ -121,9 +121,11 @@ def refresh_film_stats(connection):
     with connection.cursor() as cursor:
         cursor.execute("DROP TABLE IF EXISTS film_stats_new")
         cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
-        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, average, kind) "
-                       "SELECT s.film_id, s.c, s.a, f.kind FROM (SELECT film_id, COUNT(*) AS c, AVG(stars) AS a "
-                       "FROM ratings GROUP BY film_id) s JOIN films f ON f.id = s.film_id")
+        # One pass over ratings, then the kind by the films' primary key. Joining films in the same statement lets
+        # MariaDB run the GROUP BY once per film instead, which took longer than NFS allows a scheduled task.
+        cursor.execute("INSERT INTO film_stats_new (film_id, rating_count, average) "
+                       "SELECT film_id, COUNT(*), AVG(stars) FROM ratings GROUP BY film_id")
+        cursor.execute("UPDATE film_stats_new s JOIN films f ON f.id = s.film_id SET s.kind = f.kind")
         # The kinds for the film list's filter, so the page doesn't count them on every load.
         cursor.execute("SELECT kind, COUNT(*) FROM film_stats_new GROUP BY kind ORDER BY COUNT(*) DESC, kind LIMIT 15")
         kinds = [kind for kind, _ in cursor.fetchall()]
@@ -250,13 +252,22 @@ def start_run(connection):
 
 
 @reconnecting
-def finish_run(connection, run_id, stats, fetcher, stop_reason):
+def close_killed_runs(connection):
+    """Marks runs that never recorded their end; called while holding the crawl lock, so none of them is running."""
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE crawl_runs SET stop_reason='killed before it could finish' "
+                       "WHERE finished_at IS NULL AND stop_reason IS NULL")
+
+
+@reconnecting
+def update_run(connection, run_id, stats, fetcher, stop_reason=None):
+    """Saves a run's counters; with stop_reason also its end. Called every minute too, so a killed run keeps them."""
     with connection.cursor() as cursor:
         cursor.execute(
-            "UPDATE crawl_runs SET finished_at=NOW(), requests=%s, credits_used=%s, credits_remaining=%s, "
-            "users_done=%s, ratings_saved=%s, stop_reason=%s WHERE id=%s",
-            (fetcher.requests, fetcher.credits_used, fetcher.credits_remaining, stats["users"], stats["ratings"],
-             stop_reason[:255], run_id),
+            "UPDATE crawl_runs SET requests=%s, credits_used=%s, credits_remaining=%s, users_done=%s, ratings_saved=%s"
+            + (", finished_at=NOW(), stop_reason=%s" if stop_reason else "") + " WHERE id=%s",
+            (fetcher.requests, fetcher.credits_used, fetcher.credits_remaining, stats["users"], stats["ratings"])
+            + ((stop_reason[:255],) if stop_reason else ()) + (run_id,),
         )
 
 

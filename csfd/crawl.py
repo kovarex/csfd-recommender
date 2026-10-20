@@ -51,8 +51,11 @@ class Crawler:
                 main.close()
                 return None
         db.reset_interrupted(main)
+        db.close_killed_runs(main)
         run_id = db.start_run(main)
         self.main = main
+        self.run_id = run_id
+        self.progress_saved = time.monotonic()
         try:
             with ThreadPoolExecutor(self.workers) as pool:
                 for future in [pool.submit(self.worker) for _ in range(self.workers)]:
@@ -61,14 +64,27 @@ class Crawler:
             reason = self.stop_reason or "time limit"
             if getattr(self.fetcher, "rendering", False):
                 reason += " (rendered in a browser)"
-            db.finish_run(main, run_id, self.stats, self.fetcher, reason)
+            with self.stats_lock:
+                db.update_run(main, run_id, self.stats, self.fetcher, reason)
             log.info("Stopped (%s): %s users, %s ratings, %s requests, %s credits used, %s left", reason,
                      self.stats["users"], self.stats["ratings"], self.fetcher.requests,
                      self.fetcher.credits_used, self.fetcher.credits_remaining)
             main.close()
         return reason
 
+    def save_progress(self):
+        """Every minute, so the web shows a running run's progress and a killed run keeps its counters. The main
+        connection is shared with claim(), hence its lock; the main thread only waits for the workers."""
+        if time.monotonic() - self.progress_saved < 60:
+            return
+        with self.claim_lock, self.stats_lock:
+            if time.monotonic() - self.progress_saved < 60:
+                return
+            self.progress_saved = time.monotonic()
+            db.update_run(self.main, self.run_id, self.stats, self.fetcher)
+
     def should_stop(self):
+        self.save_progress()
         if self.stop_reason:
             return True
         if time.monotonic() > self.deadline:
@@ -203,16 +219,18 @@ def main():
         db.create_schema(connection)
         last = int(db.get_state(connection, "film_stats_at", 0))
         if time.time() - last >= args.max_age_hours * 3600:
+            started = time.time()
             db.refresh_film_stats(connection)
-            print("Film stats rebuilt.")
+            print(f"Film stats rebuilt in {time.time() - started:.0f} s.")
     elif args.command == "genres":
         connection = db.connect(config)
         db.create_schema(connection)
         last = int(db.get_state(connection, "genres_at", 0))
         if time.time() - last >= args.max_age_hours * 3600:
+            started = time.time()
             film_genres = genres.download()
             db.save_genres(connection, film_genres)
-            print(f"Genres of {len(film_genres)} films saved.")
+            print(f"Genres of {len(film_genres)} films saved in {time.time() - started:.0f} s.")
     elif args.command == "export":
         export.export(db.connect(config), args.dir)
     elif args.command == "stats":

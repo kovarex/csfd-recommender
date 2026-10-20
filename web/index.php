@@ -50,7 +50,7 @@ function overview_page(): void
   <table>
     <tr><th>Začátek</th><th>Konec</th><th class="num">Požadavků</th><th class="num">Uživatelů</th><th class="num">Hodnocení</th><th class="num">Kredity zbývají</th><th>Proč skončil</th></tr>
     <?php foreach (query('SELECT * FROM crawl_runs ORDER BY id DESC LIMIT 15') as $r): ?>
-      <tr><td><?= h(local_time($r['started_at'])) ?></td><td><?= $r['finished_at'] ? h(local_time($r['finished_at'])) : 'běží' ?></td><td class="num"><?= n($r['requests']) ?></td>
+      <tr><td><?= h(local_time($r['started_at'])) ?></td><td><?= $r['finished_at'] ? h(local_time($r['finished_at'])) : ($r['stop_reason'] ? '?' : 'běží') ?></td><td class="num"><?= n($r['requests']) ?></td>
         <td class="num"><?= n($r['users_done']) ?></td><td class="num"><?= n($r['ratings_saved']) ?></td>
         <td class="num"><?= $r['credits_remaining'] === null ? '' : n($r['credits_remaining']) ?></td><td><?= h($r['stop_reason']) ?></td></tr>
     <?php endforeach ?>

@@ -300,6 +300,13 @@ class CrawlTest(unittest.TestCase):
         db.create_schema(self.connection)
         self.assertEqual(self.query("SELECT kind FROM film_stats"), (("film",),))
 
+    def test_next_run_marks_a_killed_run(self):
+        db.create_schema(self.connection)
+        db.start_run(self.connection)
+        self.crawl(FakeFetcher({}))
+        self.assertEqual(self.query("SELECT stop_reason FROM crawl_runs ORDER BY id")[0],
+                         ("killed before it could finish",))
+
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
         db.create_schema(self.connection)
