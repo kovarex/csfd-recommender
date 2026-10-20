@@ -11,6 +11,8 @@ recommendations comes next.
 
 - Every user's ratings live at `https://www.csfd.cz/uzivatel/<id>/hodnoceni/`, 50 per page.
 - `python3 -m csfd.crawl run` goes through users added by hand first, then every user ID from 1 upwards.
+  Users listed in `priority-users.txt` are queued first on every run unless already scraped (`crawl prioritize`);
+  `crawl add <id>` queues a user to be scraped again from the start.
   Missing IDs (404) are recorded and skipped; enumeration stops after `max_missing_streak` missing IDs in a row.
 - Progress is saved after every page, so each run continues exactly where the last one stopped.
   A run stops at its time limit, when scrape.do credits drop below `min_credits`, or when ČSFD serves an

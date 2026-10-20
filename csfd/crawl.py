@@ -186,6 +186,8 @@ def main():
     run.add_argument("--workers", type=int, help="parallel downloads (overrides the config)")
     add = sub.add_parser("add", help="queue users (numeric IDs) to be scraped first, e.g. yourself")
     add.add_argument("user_ids", type=int, nargs="+")
+    prioritize = sub.add_parser("prioritize", help="scrape the users listed in a file first, unless already scraped")
+    prioritize.add_argument("file", help="one numeric ČSFD user ID per line, # starts a comment")
     sub.add_parser("stats", help="show what is in the database")
     genres_parser = sub.add_parser("genres", help="download film genres from Wikidata into the film_genres table")
     genres_parser.add_argument("--max-age-hours", type=float, default=0,
@@ -214,6 +216,12 @@ def main():
         for user_id in args.user_ids:
             db.requeue_user(connection, user_id)
         print(f"Queued {len(args.user_ids)} user(s).")
+    elif args.command == "prioritize":
+        with open(args.file, encoding="utf-8") as f:
+            user_ids = [int(line.split("#")[0]) for line in f if line.split("#")[0].strip()]
+        connection = db.connect(config)
+        db.create_schema(connection)
+        db.prioritize_users(connection, user_ids)
     elif args.command == "film-stats":
         connection = db.connect(config)
         db.create_schema(connection)

@@ -11,6 +11,7 @@ LOG="$HOME/logs/csfd-crawl.log"
 git pull -q --ff-only >> "$LOG" 2>&1 || echo "$(date) git pull failed, running the current code" >> "$LOG"
 python3 -m pip install -q --user -r requirements.txt >> "$LOG" 2>&1
 sh deploy-web.sh >> "$LOG" 2>&1
+python3 -m csfd.crawl prioritize priority-users.txt >> "$LOG" 2>&1
 python3 -m csfd.crawl film-stats --max-age-hours 4 >> "$LOG" 2>&1
 python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
 LEFT=$(( ${CSFD_MINUTES:-11} * 60 - $(date +%s) + START ))

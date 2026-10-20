@@ -222,6 +222,15 @@ def add_users(connection, user_ids):
 
 
 @reconnecting
+def prioritize_users(connection, user_ids):
+    """Moves users to the front of the queue unless they are already scraped; safe to repeat on every run."""
+    with connection.cursor() as cursor:
+        cursor.executemany("INSERT INTO users (id, priority) VALUES (%s, 1) "
+                           "ON DUPLICATE KEY UPDATE priority = IF(status = %s, priority, 1)",
+                           [(user_id, DONE) for user_id in user_ids])
+
+
+@reconnecting
 def requeue_user(connection, user_id):
     """Scrape the user again from the first page (keeps ratings already stored, updates changed ones)."""
     with connection.cursor() as cursor:

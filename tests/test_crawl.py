@@ -309,6 +309,16 @@ class CrawlTest(unittest.TestCase):
         self.assertEqual(self.query("SELECT stop_reason FROM crawl_runs ORDER BY id")[0],
                          ("killed before it could finish",))
 
+    def test_prioritize_skips_scraped_users(self):
+        db.create_schema(self.connection)
+        db.add_users(self.connection, [1, 2])
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE users SET status=%s WHERE id=2", (db.DONE,))
+        db.prioritize_users(self.connection, [1, 2, 7])
+        db.prioritize_users(self.connection, [1, 2, 7])
+        self.assertEqual(self.query("SELECT id, status, priority FROM users ORDER BY id"),
+                         ((1, db.WAITING, 1), (2, db.DONE, 0), (7, db.WAITING, 1)))
+
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
         db.create_schema(self.connection)
