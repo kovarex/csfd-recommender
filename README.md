@@ -56,6 +56,14 @@ The log goes to `~/logs/csfd-crawl.log`.
 
 ## Training the model
 
+The whole cycle in one command on the PC (WSL), as often as you like: `./update-model.sh` exports the database on NFS,
+downloads it to `~/csfd-data`, trains, writes `web-model.bin` (`ml.publish`: films with at least 30 ratings, users with
+at least 200 for the similar users list) and uploads it to `/home/protected/csfd-model.bin`. The web page
+`?view=recommend&id=<user>` (linked as „Doporučení“ from every user) then computes the user's taste from their current
+ratings in the database (`web/model.php`, the same maths as `ml.recommend`, about 0.5 s for 5000 ratings) and shows
+the best films, gems, personal trash, films closest to and farthest from the taste, and similar users.
+The steps by hand:
+
 1. On NFS, export the database (about 100 MB per 10 million ratings) to `~/exports`:
    ```
    cd /home/private/csfd-recommender && python3 -m csfd.crawl export

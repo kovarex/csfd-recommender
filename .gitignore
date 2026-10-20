@@ -1,3 +1,6 @@
 __pycache__/
 *.ini
 !config.example.ini
+model.npz
+web-model.bin
+.venv/

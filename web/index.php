@@ -1,6 +1,7 @@
 <?php
 // Browser for the scraped ČSFD ratings database.
 require __DIR__ . '/lib.php';
+require __DIR__ . '/model.php';
 
 require_password();
 $view = $_GET['view'] ?? 'overview';
@@ -11,6 +12,7 @@ switch ($view)
 {
   case 'users': users_page($offset); break;
   case 'user': user_page($id, $offset); break;
+  case 'recommend': recommend_page($id); break;
   case 'films': films_page($offset); break;
   case 'film': film_page($id, $offset); break;
   case 'search': search_page(trim($_GET['q'] ?? '')); break;
@@ -114,7 +116,8 @@ function user_page(int $id, int $offset): void
   header_html($user['name'] ?? "Uživatel $id");
   $csfd = 'https://www.csfd.cz/uzivatel/' . $id . ($user['slug'] ? '-' . $user['slug'] : '') . '/hodnoceni/';
   echo '<p>' . n($user['rating_count']) . ' hodnocení · stav ' . h(STATUS_NAMES[$user['status']] ?? '') .
-       ' · staženo ' . h(local_time($user['scraped_at'])) . ' · <a href="' . h($csfd) . '">profil na ČSFD</a></p>';
+       ' · staženo ' . h(local_time($user['scraped_at'])) . ' · <a href="' . h($csfd) . '">profil na ČSFD</a>' .
+       ' · <b><a href="' . h(url(['view' => 'recommend', 'id' => $id])) . '">Doporučení</a></b></p>';
   distribution(query('SELECT stars, COUNT(*) AS count FROM ratings WHERE user_id=? GROUP BY stars', [$id]));
 
   $total = (int)value('SELECT COUNT(*) FROM ratings WHERE user_id=?', [$id]);
@@ -193,6 +196,140 @@ function films_page(int $offset): void
   </table>
   <?php
   echo pager($total);
+}
+
+function recommend_page(int $id): void
+{
+  $user = query('SELECT * FROM users WHERE id=?', [$id])[0] ?? null;
+  $name = $user['name'] ?? "Uživatel $id";
+  header_html("Doporučení: $name");
+  $model = load_model(model_path());
+  if (!$model)
+  {
+    echo '<p class="note">Model ještě není nahraný. Nahraje ho update-model.sh z PC po natrénování.</p>';
+    return;
+  }
+  $list = isset(RECOMMEND_LISTS[$_GET['list'] ?? '']) ? $_GET['list'] : 'best';
+  $genre = isset(GENRE_NAMES[$_GET['genre'] ?? '']) ? $_GET['genre'] : '';
+  $min = max(1, (int)($_GET['min'] ?? 100));
+  $tabs = [];
+  foreach (RECOMMEND_LISTS as $key => [$label])
+    $tabs[] = $key === $list ? '<b>' . h($label) . '</b>'
+                             : '<a href="' . h(url(['view' => 'recommend', 'id' => $id, 'list' => $key, 'genre' => $genre, 'min' => $_GET['min'] ?? null])) . '">' . h($label) . '</a>';
+  echo '<p><a href="' . h(url(['view' => 'user', 'id' => $id])) . '">← hodnocení uživatele</a></p>';
+  echo '<p class="filters">' . implode(' · ', $tabs) . '</p>';
+  echo '<p class="note">' . h(RECOMMEND_LISTS[$list][1]) . '</p>';
+
+  $started = microtime(true);
+  $ratings = [];
+  foreach (query('SELECT film_id, stars FROM ratings WHERE user_id=?', [$id]) as $r)
+    $ratings[(int)$r['film_id']] = (int)$r['stars'];
+  $taste = fold_in($model, $ratings);
+  if (!$taste || $taste['films'] < 10)
+  {
+    echo '<p class="note">Na doporučení je potřeba aspoň 10 hodnocení filmů, které model zná.</p>';
+    return;
+  }
+
+  if ($list === 'users')
+    similar_users($model, $taste, $id);
+  else
+  {
+    ?>
+    <form class="filters">
+      <input type="hidden" name="view" value="recommend"><input type="hidden" name="id" value="<?= $id ?>">
+      <input type="hidden" name="list" value="<?= h($list) ?>">
+      žánr <select name="genre"><option value="">vše</option>
+        <?php foreach (GENRE_NAMES as $key => $genreName): ?>
+          <option value="<?= h($key) ?>" <?= $key === $genre ? 'selected' : '' ?>><?= h($genreName) ?></option>
+        <?php endforeach ?></select>
+      min. hodnocení <input name="min" type="number" value="<?= $min ?>" min="1">
+      <button>Zobrazit</button>
+    </form>
+    <?php
+    recommended_films($model, $taste, $list, $ratings, $genre, $min);
+  }
+  echo '<p class="note">Model natrénován ' . h(local_time($model['trained_at'])) . ' na ' . n($model['ratings']) .
+       ' hodnoceních (průměrná chyba odhadu ' . number_format($model['validation_rmse'], 2, ',', '') . ' hvězdičky). ' .
+       'Vkus spočítán z ' . n($taste['films']) . ' hodnocení za ' . number_format(microtime(true) - $started, 1, ',', '') . ' s.</p>';
+}
+
+function recommended_films(array $model, array $taste, string $list, array $ratings, string $genre, int $min): void
+{
+  $inGenre = null;
+  if ($genre !== '')
+    $inGenre = array_flip(array_map('intval', array_column(query('SELECT film_id FROM film_genres WHERE genre=?', [$genre]), 'film_id')));
+  $scores = score_films($model, $taste);
+  $ranked = [];
+  foreach ($scores as $i => [$predicted, $cosine])
+  {
+    $filmId = $model['film_ids'][$i];
+    if (!$model['film_flags'][$i] || $model['film_counts'][$i] < $min || isset($ratings[$filmId])
+        || ($inGenre !== null && !isset($inGenre[$filmId])))
+      continue;
+    $difference = clip_stars($predicted) - clip_stars($model['film_average'][$i]);
+    $ranked[$i] = ['best' => $predicted, 'above' => $difference, 'below' => -$difference, 'match' => $cosine,
+                   'opposite' => -$cosine][$list];
+  }
+  arsort($ranked);
+  $top = array_slice($ranked, 0, 50, true);
+  if (!$top)
+  {
+    echo '<p class="note">Žádné filmy neodpovídají filtru.</p>';
+    return;
+  }
+  $ids = array_map(fn($i) => $model['film_ids'][$i], array_keys($top));
+  $films = [];
+  foreach (query('SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count
+                  FROM films f LEFT JOIN film_stats s ON s.film_id=f.id WHERE f.id IN (' . implode(',', $ids) . ')') as $f)
+    $films[(int)$f['film_id']] = $f;
+  ?>
+  <table>
+    <tr><th class="num">#</th><th>Film</th><th>Typ</th><th class="num">Odhad pro tebe</th><th class="num">Průměrný divák</th>
+      <th class="num">Rozdíl</th><th class="num">Shoda vkusu</th></tr>
+    <?php $rank = 0; foreach (array_keys($top) as $i): $f = $films[$model['film_ids'][$i]] ?? null; if (!$f) continue;
+      [$predicted, $cosine] = $scores[$i]; $you = clip_stars($predicted); $average = clip_stars($model['film_average'][$i]); ?>
+      <tr><td class="num"><?= ++$rank ?></td><td><?= film_link($f) ?></td><td><?= h($f['kind']) ?></td>
+        <td class="num"><?= percent($you) ?></td><td class="num"><?= percent($average) ?></td>
+        <td class="num"><?= sprintf('%+d', round(($you - $average) * 20)) ?>&nbsp;%</td>
+        <td class="num"><?= number_format($cosine, 2, ',', '') ?></td></tr>
+    <?php endforeach ?>
+  </table>
+  <p class="note">Procenta jako na ČSFD (hvězdičky × 20). Shoda vkusu je od −1 (opačný vkus) do 1 (přesně tvůj).</p>
+  <?php
+}
+
+function similar_users(array $model, array $taste, int $id): void
+{
+  $scores = score_users($model, $taste, $id);
+  arsort($scores);
+  $closest = array_slice($scores, 0, 20, true);
+  $farthest = array_reverse(array_slice($scores, -20, null, true), true);
+  $ids = array_merge(array_keys($closest), array_keys($farthest));
+  if (!$ids)
+    return;
+  $users = [];
+  foreach (query('SELECT id AS user_id, name, rating_count FROM users WHERE id IN (' . implode(',', array_map('intval', $ids)) . ')') as $u)
+    $users[(int)$u['user_id']] = $u;
+  foreach (['Nejpodobnější vkus' => $closest, 'Nejodlišnější vkus' => $farthest] as $title => $group)
+  {
+    echo '<h2>' . h($title) . '</h2>';
+    ?>
+    <table>
+      <tr><th>Uživatel</th><th class="num">Hodnocení</th><th class="num">Shoda vkusu</th><th class="num">Společných filmů</th>
+        <th class="num">Průměrný rozdíl</th></tr>
+      <?php foreach ($group as $userId => $cosine):
+        $common = query('SELECT COUNT(*) AS c, AVG(ABS(CAST(a.stars AS SIGNED) - CAST(b.stars AS SIGNED))) AS d FROM ratings a
+                         JOIN ratings b ON b.user_id=? AND b.film_id=a.film_id WHERE a.user_id=?', [$userId, $id])[0];
+        $u = $users[$userId] ?? ['user_id' => $userId, 'name' => null, 'rating_count' => 0]; ?>
+        <tr><td><?= user_link($u) ?> <small>(<a href="<?= h(url(['view' => 'recommend', 'id' => $userId])) ?>">doporučení</a>)</small></td>
+          <td class="num"><?= n($u['rating_count']) ?></td><td class="num"><?= number_format($cosine, 2, ',', '') ?></td>
+          <td class="num"><?= n($common['c']) ?></td>
+          <td class="num"><?= $common['c'] ? number_format((float)$common['d'], 2, ',', '') . ' ★' : '' ?></td></tr>
+      <?php endforeach ?>
+    </table>
+    <?php
+  }
 }
 
 function film_page(int $id, int $offset): void

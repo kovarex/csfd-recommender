@@ -9,6 +9,15 @@ const GENRE_NAMES = ['scifi' => 'sci-fi', 'fantasy' => 'fantasy', 'horor' => 'ho
   'romanticky' => 'romantický', 'animovany' => 'animovaný', 'anime' => 'anime', 'dokumentarni' => 'dokumentární',
   'valecny' => 'válečný', 'western' => 'western', 'historicky' => 'historický', 'zivotopisny' => 'životopisný',
   'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní'];
+// Lists on the recommendations page: key => [tab label, explanation].
+const RECOMMEND_LISTS = [
+  'best' => ['Nejlepší pro tebe', 'Filmy s nejvyšším odhadem hodnocení.'],
+  'above' => ['Perly', 'Kde je odhad pro tebe nejvíc nad odhadem pro průměrného diváka.'],
+  'below' => ['Osobní odpady', 'Kde je odhad pro tebe nejvíc pod odhadem pro průměrného diváka.'],
+  'opposite' => ['Nejdál od vkusu', 'Filmy, jejichž „chuť“ jde nejvíc proti tvé, bez ohledu na to, jak jsou dobré.'],
+  'match' => ['Nejblíž vkusu', 'Filmy, jejichž „chuť“ je nejblíž tvé, bez ohledu na to, jak jsou dobré.'],
+  'users' => ['Podobní uživatelé', 'Uživatelé s nejpodobnějším a nejodlišnějším vkusem (aspoň 200 hodnocení).'],
+];
 
 function config(): array
 {
