@@ -103,13 +103,16 @@ class Crawler:
             row = db.claim_waiting_user(self.main)
             if row:
                 return row
-            next_id = int(db.get_state(self.main, "next_user_id", 1))
-            missing_streak = int(db.get_state(self.main, "missing_streak", 0))
-            if missing_streak >= self.max_missing_streak:
-                return None
-            db.set_state(self.main, "next_user_id", next_id + 1)
-            db.add_users(self.main, [next_id])
-            row = db.claim_waiting_user(self.main)
+            # The next ID can belong to a user who is already in the table (scraped first as a priority user, or
+            # missing); then the one after it is tried, instead of reporting that nothing is left.
+            while not row:
+                next_id = int(db.get_state(self.main, "next_user_id", 1))
+                missing_streak = int(db.get_state(self.main, "missing_streak", 0))
+                if missing_streak >= self.max_missing_streak:
+                    return None
+                db.set_state(self.main, "next_user_id", next_id + 1)
+                db.add_users(self.main, [next_id])
+                row = db.claim_waiting_user(self.main)
             return row
 
     def worker(self):

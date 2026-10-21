@@ -215,6 +215,17 @@ class CrawlTest(unittest.TestCase):
         self.assertEqual(self.query("SELECT COUNT(*) FROM films")[0][0], 3)
         self.assertEqual(self.query("SELECT requests, users_done, ratings_saved FROM crawl_runs"), ((len(fetcher.urls), 2, 4),))
 
+    def test_enumeration_skips_users_scraped_already(self):
+        db.create_schema(self.connection)
+        db.add_users(self.connection, [2])
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE users SET status=%s WHERE id=2", (db.DONE,))  # Scraped first as a priority user.
+        fetcher = FakeFetcher({url(1): ratings_page(1, 1, 1, [(100, "stars-5")]),
+                               url(3): ratings_page(3, 1, 1, [(100, "stars-1")])})
+        self.crawl(fetcher)
+        self.assertIn(url(3), fetcher.urls)
+        self.assertNotIn(url(2), fetcher.urls)
+
     def test_next_run_continues_where_the_last_one_stopped(self):
         pages = {url(1, p): ratings_page(1, p, 3, [(100 + p, "stars-4")]) for p in (1, 2, 3)}
         pages[url(1, 2)] = Blocked(url(1, 2))
