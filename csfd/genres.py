@@ -42,7 +42,7 @@ GENRES = {
     "antologie": ["Q23653"],
 }
 # Raise when the genres change, so the next run downloads them again instead of waiting a week.
-VERSION = 2
+VERSION = 3
 
 
 def sparql(query, attempts=3):

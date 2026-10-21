@@ -349,9 +349,12 @@ class CrawlTest(unittest.TestCase):
             read_film_genres(self.connection, fetcher, [1, 2, 4], 2)
         read_film_genres(self.connection, fetcher, [1, 2], 2)
         self.assertEqual(db.films_without_genres(self.connection, 100, 10), [4])
-        db.save_genres(self.connection, {2: {"drama"}})  # The weekly Wikidata download keeps ČSFD's genres.
-        self.assertEqual(self.query("SELECT film_id, genre FROM film_genres ORDER BY film_id"),
-                         ((1, "dokumentarni"), (2, "drama")))
+        # The weekly Wikidata download keeps ČSFD's genres and adds its own only where ČSFD wasn't read, or anthologies.
+        db.save_genres(self.connection, {1: {"drama", "antologie"}, 2: {"drama"}, 4: {"drama"}})
+        self.assertEqual(self.query("SELECT film_id, genre FROM film_genres ORDER BY film_id, genre"),
+                         ((1, "antologie"), (1, "dokumentarni"), (4, "drama")))
+        db.save_film_genres(self.connection, 4, ["komedie"])
+        self.assertEqual(self.query("SELECT genre FROM film_genres WHERE film_id=4"), (("komedie",),))
 
     def test_film_stats_copy_the_kind_and_cache_the_kinds(self):
         db.create_schema(self.connection)
