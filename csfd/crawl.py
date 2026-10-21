@@ -39,6 +39,7 @@ class Crawler:
         self.stats_lock = threading.Lock()
         self.stats = {"users": 0, "ratings": 0}
         self.stop_reason = None
+        self.nothing_left = False
         self.deadline = None
 
     def run(self, minutes):
@@ -63,7 +64,7 @@ class Crawler:
                 for future in [pool.submit(self.worker) for _ in range(self.workers)]:
                     future.result()
         finally:
-            reason = self.stop_reason or "time limit"
+            reason = self.stop_reason or ("nothing left to scrape" if self.nothing_left else "time limit")
             if getattr(self.fetcher, "rendering", False):
                 reason += " (rendered in a browser)"
             with self.stats_lock:
@@ -98,7 +99,7 @@ class Crawler:
         return False
 
     def claim(self):
-        """Next (user_id, pages_done) to scrape, or None when there is nothing left."""
+        """Next (user_id, pages_done, priority) to scrape, or None when there is nothing left."""
         with self.claim_lock:
             row = db.claim_waiting_user(self.main)
             if row:
@@ -121,7 +122,8 @@ class Crawler:
             while not self.should_stop():
                 claimed = self.claim()
                 if not claimed:
-                    self.stop_reason = self.stop_reason or "nothing left to scrape"
+                    # Only this worker ends: the others finish the users they are scraping.
+                    self.nothing_left = True
                     return
                 self.scrape_user(connection, *claimed)
         except Exception as e:
