@@ -19,6 +19,8 @@ const ANTHOLOGY_MIN_SPREAD = 0.62;
 const ANTHOLOGY_MIN_USERS = 20;
 // Anthologies Wikidata doesn't mark: ČSFD IDs.
 const EXTRA_ANTHOLOGIES = [1193901 /* Kabinet kuriozit Guillerma del Tora */];
+// Series Wikidata marks as anthologies that tell one story: ČSFD IDs.
+const NOT_ANTHOLOGIES = [484253 /* Proč? 13x proto */];
 // Kinds the recommendations show unless others are chosen. Concerts, nature series and the like are rated mostly by
 // their fans, so their high averages say little about anyone else, and they crowded the top of the list.
 const DEFAULT_RECOMMEND_KINDS = ['film', 'TV film', 'seriál', ANTHOLOGY_EPISODE];

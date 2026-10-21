@@ -148,13 +148,20 @@ def refresh_film_stats(connection):
     set_state(connection, "film_stats_started_at", int(time.time()))
     kill_leftover_film_stats_queries(connection)
     counts, sums = {}, {}
+    started = time.time()
     (low, high), = run_statement(connection, "SELECT MIN(user_id), MAX(user_id) FROM ratings")
-    for start in range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP):
-        for film_id, count, total in run_statement(
-                connection, "SELECT film_id, COUNT(*), SUM(stars) FROM ratings WHERE user_id BETWEEN %s AND %s "
-                            "GROUP BY film_id", (start, start + FILM_STATS_USER_STEP - 1)):
-            counts[film_id] = counts.get(film_id, 0) + count
-            sums[film_id] = sums.get(film_id, 0) + int(total)
+    starts = range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP)
+    for number, start in enumerate(starts, 1):
+        # Plain reads of a primary key range: with a GROUP BY per range (probably a temporary table each time) the
+        # rebuild was killed after 4 minutes on 16 M ratings on NFS, while series-stats reading every rating
+        # finished within its 3 minutes.
+        for film_id, stars in run_statement(
+                connection, "SELECT film_id, stars FROM ratings WHERE user_id BETWEEN %s AND %s",
+                (start, start + FILM_STATS_USER_STEP - 1)):
+            counts[film_id] = counts.get(film_id, 0) + 1
+            sums[film_id] = sums.get(film_id, 0) + stars
+        if number % 10 == 0:
+            set_state(connection, "film_stats_progress", f"{number}/{len(starts)} ranges in {time.time() - started:.0f} s")
     kinds = {}
     (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
     for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
@@ -183,6 +190,7 @@ def refresh_film_stats(connection):
         top.pop()
     set_state(connection, "film_kinds", json.dumps(top, ensure_ascii=False))
     set_state(connection, "film_stats_at", int(time.time()))
+    set_state(connection, "film_stats_progress", f"done in {time.time() - started:.0f} s")
 
 
 def refresh_series_stats(connection):

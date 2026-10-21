@@ -66,7 +66,8 @@ function overview_page(): void
   <?php endforeach ?>
   <?php foreach (query("SELECT name, value FROM crawl_state WHERE name LIKE 'running\\_%' ORDER BY name") as $e):
     if (time() - (int)$e['value'] > 5 * 60): ?>
-    <p class="note">Krok <?= h(substr($e['name'], 8)) ?> spuštěný <?= h(local_time((int)$e['value'])) ?> nedoběhl (asi ho ukončil časový limit).</p>
+    <p class="note">Krok <?= h(substr($e['name'], 8)) ?> spuštěný <?= h(local_time((int)$e['value'])) ?> nedoběhl (asi ho ukončil časový limit).
+      <?= $e['name'] === 'running_film-stats' ? 'Stihl: ' . h(value("SELECT value FROM crawl_state WHERE name='film_stats_progress'")) : '' ?></p>
   <?php endif; endforeach ?>
   <?php
 }
@@ -315,6 +316,7 @@ function allowed_films(array $kinds): array
     $anthologies = array_merge(EXTRA_ANTHOLOGIES, array_map('intval', array_column(query(
       "SELECT s.series_id FROM series_stats s JOIN film_genres g ON g.film_id=s.series_id AND g.genre='antologie'
        WHERE s.users >= ? AND s.spread >= ?", [ANTHOLOGY_MIN_USERS, ANTHOLOGY_MIN_SPREAD]), 'series_id')));
+    $anthologies = array_values(array_diff($anthologies, NOT_ANTHOLOGIES));
     if ($anthologies)
     {
       $list = implode(',', $anthologies);
