@@ -11,10 +11,12 @@ LOG="$HOME/logs/csfd-crawl.log"
 git pull -q --ff-only >> "$LOG" 2>&1 || echo "$(date) git pull failed, running the current code" >> "$LOG"
 python3 -m pip install -q --user -r requirements.txt >> "$LOG" 2>&1
 sh deploy-web.sh >> "$LOG" 2>&1
-python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 24 >> "$LOG" 2>&1
-python3 -m csfd.crawl film-stats --max-age-hours 4 >> "$LOG" 2>&1
-python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
-python3 -m csfd.crawl series-stats --max-age-hours 24 >> "$LOG" 2>&1
+# Each preparation step gets a time limit, so a slow one can't take the whole scheduled task from the scraping.
+limit() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
+limit 60 python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 24 >> "$LOG" 2>&1
+limit 240 python3 -m csfd.crawl film-stats --max-age-hours 4 >> "$LOG" 2>&1
+limit 180 python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
+limit 180 python3 -m csfd.crawl series-stats --max-age-hours 24 >> "$LOG" 2>&1
 LEFT=$(( ${CSFD_MINUTES:-11} * 60 - $(date +%s) + START ))
 if [ "$LEFT" -lt 60 ]; then
   echo "$(date) no time left for scraping after the preparation steps" >> "$LOG"

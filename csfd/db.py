@@ -186,22 +186,26 @@ def refresh_film_stats(connection):
 
 
 def refresh_series_stats(connection):
-    """Rebuilds series_stats from the episode ratings, read in short queries per range of users."""
-    season_series = {}
+    """Rebuilds series_stats from the episode ratings. Ratings are read in short queries per range of users and the
+    episodes picked out here: joining films in the query made MariaDB scan all episode ratings for every range."""
+    episode_series, season_series = {}, {}
     (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
     for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
-        season_series.update(run_statement(
-            connection, "SELECT id, parent_id FROM films WHERE kind='série' AND parent_id IS NOT NULL "
-                        "AND id BETWEEN %s AND %s", (start, start + FILM_STATS_FILM_STEP - 1)))
+        for film_id, parent_id, kind in run_statement(
+                connection, "SELECT id, parent_id, kind FROM films WHERE kind IN ('série', 'epizoda') "
+                            "AND parent_id IS NOT NULL AND id BETWEEN %s AND %s", (start, start + FILM_STATS_FILM_STEP - 1)):
+            (season_series if kind == "série" else episode_series)[film_id] = parent_id
+    episode_series = {episode: season_series.get(parent, parent) for episode, parent in episode_series.items()}
     spread_sums, users, episodes = {}, {}, {}
     (low, high), = run_statement(connection, "SELECT MIN(user_id), MAX(user_id) FROM ratings")
     for start in range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP):
         per_user = {}  # (user, series) -> [count, sum, sum of squares]
-        for user_id, film_id, parent_id, stars in run_statement(
-                connection, "SELECT r.user_id, r.film_id, f.parent_id, r.stars FROM ratings r JOIN films f ON f.id = r.film_id "
-                            "WHERE r.user_id BETWEEN %s AND %s AND f.kind='epizoda' AND f.parent_id IS NOT NULL",
+        for user_id, film_id, stars in run_statement(
+                connection, "SELECT user_id, film_id, stars FROM ratings WHERE user_id BETWEEN %s AND %s",
                 (start, start + FILM_STATS_USER_STEP - 1)):
-            series = season_series.get(parent_id, parent_id)
+            series = episode_series.get(film_id)
+            if series is None:
+                continue
             episodes.setdefault(series, set()).add(film_id)
             sums = per_user.setdefault((user_id, series), [0, 0, 0])
             sums[0] += 1

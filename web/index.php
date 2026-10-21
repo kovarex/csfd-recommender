@@ -64,6 +64,10 @@ function overview_page(): void
   <?php foreach (query("SELECT name, value FROM crawl_state WHERE name LIKE 'error\\_%' ORDER BY name") as $e): ?>
     <p class="note">Poslední chyba kroku <?= h(substr($e['name'], 6)) ?>: <?= h($e['value']) ?></p>
   <?php endforeach ?>
+  <?php foreach (query("SELECT name, value FROM crawl_state WHERE name LIKE 'running\\_%' ORDER BY name") as $e):
+    if (time() - (int)$e['value'] > 5 * 60): ?>
+    <p class="note">Krok <?= h(substr($e['name'], 8)) ?> spuštěný <?= h(local_time((int)$e['value'])) ?> nedoběhl (asi ho ukončil časový limit).</p>
+  <?php endif; endforeach ?>
   <?php
 }
 

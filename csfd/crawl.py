@@ -206,6 +206,12 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config(args.config)
+    if args.command != "run":
+        # Cleared when the command ends; left behind when NFS kills it, so the overview can say it didn't finish.
+        try:
+            db.set_state(db.connect(config), f"running_{args.command}", int(time.time()))
+        except Exception:
+            log.exception("Could not save the start")
     try:
         run_command(args, config)
     except Exception as e:
@@ -221,6 +227,11 @@ def main():
             db.clear_state(db.connect(config), f"error_{args.command}")
         except Exception:
             log.exception("Could not clear the error")
+    finally:
+        try:
+            db.clear_state(db.connect(config), f"running_{args.command}")
+        except Exception:
+            log.exception("Could not clear the start")
 
 
 def run_command(args, config):
@@ -255,8 +266,10 @@ def run_command(args, config):
     elif args.command == "series-stats":
         connection = db.connect(config)
         db.create_schema(connection)
-        last = int(db.get_state(connection, "series_stats_at", 0))
+        # Counted from the last attempt, so a rebuild cut off by the time limit is tried once a day, not every run.
+        last = int(db.get_state(connection, "series_stats_attempt_at", 0))
         if time.time() - last >= args.max_age_hours * 3600:
+            db.set_state(connection, "series_stats_attempt_at", int(time.time()))
             started = time.time()
             db.refresh_series_stats(connection)
             print(f"Series stats rebuilt in {time.time() - started:.0f} s.")
