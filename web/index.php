@@ -16,6 +16,7 @@ switch ($view)
   case 'films': films_page($offset); break;
   case 'film': film_page($id, $offset); break;
   case 'search': search_page(trim($_GET['q'] ?? '')); break;
+  case 'series': series_page($offset); break;
   default: overview_page();
 }
 footer_html();
@@ -393,6 +394,36 @@ function similar_users(array $model, array $taste, int $id): void
   }
 }
 
+function series_page(int $offset): void
+{
+  header_html('Seriály podle rozptylu hodnocení epizod');
+  echo '<p class="note">Jak rozdílně hodnotí stejný divák jednotlivé epizody (směrodatná odchylka jeho hodnocení ve hvězdičkách, ' .
+       'průměr přes diváky s aspoň 3 epizodami). Vysoká hodnota znamená, že epizody se posuzují každá zvlášť, třeba u antologií.</p>';
+  $min = max(1, (int)($_GET['min'] ?? 50));
+  [$sort, $direction] = sort_param(['spread', 'users', 'episodes'], 'spread', 'desc');
+  ?>
+  <form class="filters"><input type="hidden" name="view" value="series">
+    min. diváků <input name="min" type="number" value="<?= $min ?>" min="1"><button>Zobrazit</button></form>
+  <?php
+  $total = (int)value('SELECT COUNT(*) FROM series_stats WHERE users >= ?', [$min]);
+  echo pager($total);
+  $rows = query("SELECT t.series_id AS film_id, t.users, t.episodes, t.spread, f.title, f.year, f.kind, f.slug, f.parent_id,
+                        s.average, s.rating_count
+                 FROM series_stats t JOIN films f ON f.id=t.series_id LEFT JOIN film_stats s ON s.film_id=t.series_id
+                 WHERE t.users >= ? ORDER BY t.$sort $direction, t.series_id LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, [$min]);
+  ?>
+  <table>
+    <tr><th>Seriál</th><?= sort_header('Rozptyl', 'spread', 'desc', 'num') ?><?= sort_header('Diváků', 'users', 'desc', 'num') ?>
+      <?= sort_header('Epizod', 'episodes', 'desc', 'num') ?></tr>
+    <?php foreach ($rows as $r): ?>
+      <tr><td><?= film_link($r) ?></td><td class="num"><?= number_format((float)$r['spread'], 2, ',', '') ?></td>
+        <td class="num"><?= n($r['users']) ?></td><td class="num"><?= n($r['episodes']) ?></td></tr>
+    <?php endforeach ?>
+  </table>
+  <?php
+  echo pager($total);
+}
+
 function film_page(int $id, int $offset): void
 {
   $film = query('SELECT f.*, p.title AS parent_title FROM films f LEFT JOIN films p ON p.id=f.parent_id WHERE f.id=?', [$id])[0] ?? null;
@@ -413,6 +444,11 @@ function film_page(int $id, int $offset): void
   echo '<p>' . h($film['kind']) . ($genres ? ' · ' . implode(', ', $genres) : '') . ($film['parent_title'] ? ' · patří k <a href="' . h(url(['view' => 'film', 'id' => $film['parent_id']])) . '">' . h($film['parent_title']) . '</a>' : '') .
        ' · ' . n($total) . ' hodnocení' . ($total ? ' · ' . percent($sum / $total) : '') .
        ' · <a href="' . h($csfd) . '">na ČSFD</a></p>';
+  $seriesStats = query('SELECT users, episodes, spread FROM series_stats WHERE series_id=?', [$id])[0] ?? null;
+  if ($seriesStats)
+    echo '<p class="note">Epizody: ' . n($seriesStats['episodes']) . ' hodnocených, stejný divák je hodnotí v průměru s rozptylem ' .
+         number_format((float)$seriesStats['spread'], 2, ',', '') . ' ★ (' . n($seriesStats['users']) . ' diváků s aspoň 3 epizodami, ' .
+         '<a href="' . h(url(['view' => 'series'])) . '">srovnání seriálů</a>).</p>';
   distribution($distribution);
 
   echo pager($total);

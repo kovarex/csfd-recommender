@@ -196,6 +196,9 @@ def main():
                                help="only download when the last download is older than this")
     export_parser = sub.add_parser("export", help="write ratings, films and users to gzipped CSV for training")
     export_parser.add_argument("--dir", default=os.path.expanduser("~/exports"))
+    series_stats = sub.add_parser("series-stats", help="rebuild how differently viewers rate each series' episodes")
+    series_stats.add_argument("--max-age-hours", type=float, default=0,
+                              help="only rebuild when the last rebuild is older than this")
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
     film_stats.add_argument("--max-age-hours", type=float, default=0,
                             help="only rebuild when the last rebuild is older than this")
@@ -232,6 +235,14 @@ def main():
             started = time.time()
             db.refresh_film_stats(connection)
             print(f"Film stats rebuilt in {time.time() - started:.0f} s.")
+    elif args.command == "series-stats":
+        connection = db.connect(config)
+        db.create_schema(connection)
+        last = int(db.get_state(connection, "series_stats_at", 0))
+        if time.time() - last >= args.max_age_hours * 3600:
+            started = time.time()
+            db.refresh_series_stats(connection)
+            print(f"Series stats rebuilt in {time.time() - started:.0f} s.")
     elif args.command == "genres":
         connection = db.connect(config)
         db.create_schema(connection)

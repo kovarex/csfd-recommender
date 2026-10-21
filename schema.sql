@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS ratings (
   KEY film_id (film_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- How differently the same viewer rates a series' episodes, rebuilt by `python3 -m csfd.crawl series-stats`: in a
+-- series with one story people rate the episodes alike, in an anthology every episode is judged on its own.
+CREATE TABLE IF NOT EXISTS series_stats (
+  series_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  -- Viewers who rated at least 3 of its episodes, and the episodes rated by anyone.
+  users INT UNSIGNED NOT NULL,
+  episodes INT UNSIGNED NOT NULL,
+  -- Average over those viewers of the standard deviation of their episode ratings, in stars.
+  spread DECIMAL(5,3) NOT NULL,
+  KEY users (users)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Broad genres from Wikidata (csfd/genres.py), also for films we have no ratings of yet.
 CREATE TABLE IF NOT EXISTS film_genres (
   film_id INT UNSIGNED NOT NULL,

@@ -14,6 +14,7 @@ sh deploy-web.sh >> "$LOG" 2>&1
 python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 24 >> "$LOG" 2>&1
 python3 -m csfd.crawl film-stats --max-age-hours 4 >> "$LOG" 2>&1
 python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
+python3 -m csfd.crawl series-stats --max-age-hours 24 >> "$LOG" 2>&1
 LEFT=$(( ${CSFD_MINUTES:-11} * 60 - $(date +%s) + START ))
 if [ "$LEFT" -lt 60 ]; then
   echo "$(date) no time left for scraping after the preparation steps" >> "$LOG"

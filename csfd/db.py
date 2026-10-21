@@ -185,6 +185,46 @@ def refresh_film_stats(connection):
     set_state(connection, "film_stats_at", int(time.time()))
 
 
+def refresh_series_stats(connection):
+    """Rebuilds series_stats from the episode ratings, read in short queries per range of users."""
+    season_series = {}
+    (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
+    for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
+        season_series.update(run_statement(
+            connection, "SELECT id, parent_id FROM films WHERE kind='série' AND parent_id IS NOT NULL "
+                        "AND id BETWEEN %s AND %s", (start, start + FILM_STATS_FILM_STEP - 1)))
+    spread_sums, users, episodes = {}, {}, {}
+    (low, high), = run_statement(connection, "SELECT MIN(user_id), MAX(user_id) FROM ratings")
+    for start in range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP):
+        per_user = {}  # (user, series) -> [count, sum, sum of squares]
+        for user_id, film_id, parent_id, stars in run_statement(
+                connection, "SELECT r.user_id, r.film_id, f.parent_id, r.stars FROM ratings r JOIN films f ON f.id = r.film_id "
+                            "WHERE r.user_id BETWEEN %s AND %s AND f.kind='epizoda' AND f.parent_id IS NOT NULL",
+                (start, start + FILM_STATS_USER_STEP - 1)):
+            series = season_series.get(parent_id, parent_id)
+            episodes.setdefault(series, set()).add(film_id)
+            sums = per_user.setdefault((user_id, series), [0, 0, 0])
+            sums[0] += 1
+            sums[1] += stars
+            sums[2] += stars * stars
+        for (_, series), (count, total, squares) in per_user.items():
+            if count >= 3:
+                spread_sums[series] = spread_sums.get(series, 0.0) + max(0.0, squares / count - (total / count) ** 2) ** 0.5
+                users[series] = users.get(series, 0) + 1
+    rows = [(series, users[series], len(episodes[series]), round(spread_sums[series] / users[series], 3))
+            for series in sorted(users)]
+    with connection.cursor() as cursor:
+        cursor.execute("SET SESSION lock_wait_timeout = 60")
+        cursor.execute("DROP TABLE IF EXISTS series_stats_new")
+        cursor.execute("CREATE TABLE series_stats_new LIKE series_stats")
+        for start in range(0, len(rows), 10000):
+            cursor.executemany("INSERT INTO series_stats_new (series_id, users, episodes, spread) VALUES (%s, %s, %s, %s)",
+                               rows[start:start + 10000])
+        cursor.execute("RENAME TABLE series_stats TO series_stats_old, series_stats_new TO series_stats")
+        cursor.execute("DROP TABLE series_stats_old")
+    set_state(connection, "series_stats_at", int(time.time()))
+
+
 @reconnecting
 def save_genres(connection, film_genres):
     """Replaces film_genres with {film ID: set of genres}, swapping the new table in atomically."""

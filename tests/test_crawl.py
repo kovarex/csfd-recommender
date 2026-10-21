@@ -186,7 +186,7 @@ class CrawlTest(unittest.TestCase):
         self.config = test_config()
         self.connection = db.connect(self.config)
         with self.connection.cursor() as cursor:
-            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres"):
+            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres", "series_stats"):
                 cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     def tearDown(self):
@@ -329,6 +329,20 @@ class CrawlTest(unittest.TestCase):
         db.prioritize_users(self.connection, [1, 2], rescrape_hours=24)
         self.assertEqual(self.query("SELECT id, status, priority, pages_done FROM users ORDER BY id"),
                          ((1, db.WAITING, 1, 0), (2, db.DONE, 0, 0)))
+
+    def test_series_stats_measure_how_differently_a_viewer_rates_episodes(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("INSERT INTO films (id, parent_id, slug, title, kind) VALUES (1, NULL, 's', 'S', 'seriál'), "
+                           "(2, 1, 'a', 'A', 'série'), (3, 2, 'e', 'E1', 'epizoda'), (4, 2, 'e', 'E2', 'epizoda'), "
+                           "(5, 1, 'e', 'E3', 'epizoda'), (6, 1, 'e', 'E4', 'epizoda')")
+            # User 7 rates three episodes 1, 3, 5 (standard deviation 1.633); user 8 only two, so doesn't count.
+            cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (7, 3, 1), (7, 4, 3), (7, 5, 5), "
+                           "(8, 3, 4), (8, 6, 4)")
+        with unittest.mock.patch.object(db, "FILM_STATS_USER_STEP", 1):
+            db.refresh_series_stats(self.connection)
+        self.assertEqual(self.query("SELECT series_id, users, episodes, spread FROM series_stats"),
+                         ((1, 1, 4, Decimal("1.633")),))
 
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
