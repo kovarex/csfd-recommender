@@ -215,6 +215,8 @@ def main():
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
     film_stats.add_argument("--max-age-hours", type=float, default=0,
                             help="only rebuild when the last rebuild is older than this")
+    film_stats.add_argument("--retry-hours", type=float, default=0,
+                            help="after a rebuild that didn't finish, wait this long before trying again")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -275,7 +277,8 @@ def run_command(args, config):
         connection = db.connect(config)
         db.create_schema(connection)
         last = int(db.get_state(connection, "film_stats_at", 0))
-        if time.time() - last >= args.max_age_hours * 3600:
+        tried = int(db.get_state(connection, "film_stats_started_at", 0))
+        if time.time() - last >= args.max_age_hours * 3600 and time.time() - tried >= args.retry_hours * 3600:
             started = time.time()
             db.refresh_film_stats(connection)
             print(f"Film stats rebuilt in {time.time() - started:.0f} s.")

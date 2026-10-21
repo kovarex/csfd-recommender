@@ -130,6 +130,11 @@ def run_statement(connection, sql, params=None):
         return cursor.fetchall()
 
 
+# film_stats' secondary indexes (as in schema.sql), built after the rows are written.
+FILM_STATS_KEYS = {"rating_count": "rating_count", "average": "average", "kind_count": "kind, rating_count",
+                   "kind_average": "kind, average"}
+
+
 def kill_leftover_film_stats_queries(connection):
     """A rebuild killed by NFS can leave its statement running in the database, holding film_stats_new; the next
     rebuild would then wait for it until it is killed too."""
@@ -182,10 +187,18 @@ def refresh_film_stats(connection):
         progress("creating film_stats_new")
         cursor.execute("DROP TABLE IF EXISTS film_stats_new")
         cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
+        # Writing 150 k rows into the table with its four secondary indexes was stopped by the 5 minute limit on
+        # NFS. The rows go in by primary key in one transaction and the indexes are built afterwards, in one pass.
+        cursor.execute("ALTER TABLE film_stats_new " + ", ".join(f"DROP KEY {key}" for key in FILM_STATS_KEYS))
+        connection.begin()
         for start in range(0, len(rows), 10000):
             progress(f"writing rows {start:,}/{len(rows):,}")
             cursor.executemany("INSERT INTO film_stats_new (film_id, rating_count, average, kind) "
                                "VALUES (%s, %s, %s, %s)", rows[start:start + 10000])
+        connection.commit()
+        progress("building indexes")
+        cursor.execute("ALTER TABLE film_stats_new " + ", ".join(f"ADD KEY {key} ({columns})"
+                                                                for key, columns in FILM_STATS_KEYS.items()))
         progress("swapping tables")
         cursor.execute("RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
         cursor.execute("DROP TABLE film_stats_old")

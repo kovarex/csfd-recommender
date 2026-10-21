@@ -62,7 +62,8 @@ function overview_page(): void
   <p class="note">Statistiky filmů přepočítány: <?= $statsAt ? h(local_time($statsAt)) . ', další přepočet po ' . h(local_time($statsAt + 4 * 3600)) : 'zatím ne' ?> (každé 4 hodiny, s nejbližším během).<?=
     $statsStartedAt > $statsAt ? ' Přepočet spuštěný ' . h(local_time($statsStartedAt)) . ' zatím nedoběhl.' : '' ?></p>
   <?php foreach (query("SELECT name, value FROM crawl_state WHERE name LIKE 'error\\_%' ORDER BY name") as $e): ?>
-    <p class="note">Poslední chyba kroku <?= h(substr($e['name'], 6)) ?>: <?= h($e['value']) ?></p>
+    <p class="note">Poslední chyba kroku <?= h(substr($e['name'], 6)) ?>: <?= h($e['value']) ?>
+      <?= $e['name'] === 'error_film-stats' ? 'Stihl: ' . h(value("SELECT value FROM crawl_state WHERE name='film_stats_progress'")) : '' ?></p>
   <?php endforeach ?>
   <?php foreach (query("SELECT name, value FROM crawl_state WHERE name LIKE 'running\\_%' ORDER BY name") as $e):
     if (time() - (int)$e['value'] > 5 * 60): ?>
