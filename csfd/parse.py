@@ -42,6 +42,22 @@ class NotRatingsPage(Exception):
     """The HTML is not a ratings page (anti-bot challenge, error page, changed layout...)."""
 
 
+FAN_RE = re.compile(r'<a href="/uzivatel/(\d+)-[^/"]*/')
+PROFILE_RE = re.compile(r'<link rel="canonical" href="https://www\.csfd\.cz/uzivatel/\d+-[^/"]*/prehled/')
+
+
+def parse_fanclub(page_html):
+    """User IDs in the "Fanklub" box of a profile (https://www.csfd.cz/uzivatel/<id>/prehled/): the users who added
+    this one to their favourites. ČSFD doesn't show whom the user added."""
+    if not PROFILE_RE.search(page_html):
+        raise NotRatingsPage("not a profile page")
+    start = page_html.find('id="snippet--fanclub"')
+    if start < 0:
+        return []
+    box = page_html[start:page_html.find("</section>", start)]
+    return list(dict.fromkeys(int(user_id) for user_id in FAN_RE.findall(box)))
+
+
 def is_not_found(page_html):
     return "404 - " in page_html[:5000] and "Stránka nenalezena" in page_html[:5000]
 

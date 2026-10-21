@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS film_genres (
   KEY genre (genre, film_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- The fan clubs of the priority users (priority-users.txt), scraped first too: users who added them to favourites.
+CREATE TABLE IF NOT EXISTS fans (
+  user_id INT UNSIGNED NOT NULL,
+  fan_id INT UNSIGNED NOT NULL,
+  PRIMARY KEY (user_id, fan_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS crawl_state (
   name VARCHAR(50) NOT NULL PRIMARY KEY,
   value VARCHAR(255) NOT NULL

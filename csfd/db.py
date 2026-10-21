@@ -10,6 +10,9 @@ import time
 import pymysql
 
 WAITING, IN_PROGRESS, DONE, MISSING, FAILED = range(5)
+# users.priority: queued by hand or as a priority user (scraped whole), and scraped again to pick up new ratings, which
+# stops at the first page that brings nothing new (ČSFD lists ratings newest first).
+PRIORITY, REFRESH = 1, 2
 
 # MySQL server has gone away, lost connection during query, can't connect.
 LOST_CONNECTION_ERRORS = (2003, 2006, 2013)
@@ -307,14 +310,32 @@ def prioritize_users(connection, user_ids, rescrape_hours=None):
     """Moves users to the front of the queue unless they are already scraped; with rescrape_hours, also users
     scraped longer ago than that, so their new ratings show up. Safe to repeat on every run."""
     with connection.cursor() as cursor:
-        cursor.executemany("INSERT INTO users (id, priority) VALUES (%s, 1) "
-                           "ON DUPLICATE KEY UPDATE priority = IF(status = %s, priority, 1)",
-                           [(user_id, DONE) for user_id in user_ids])
+        # Constants in the text: executemany can't take parameters after VALUES (...).
+        cursor.executemany(f"INSERT INTO users (id, priority) VALUES (%s, {PRIORITY}) ON DUPLICATE KEY UPDATE "
+                           f"priority = IF(status = {DONE} OR priority = {REFRESH}, priority, {PRIORITY})",
+                           [(user_id,) for user_id in user_ids])
         if rescrape_hours is not None and user_ids:
-            cursor.execute(f"UPDATE users SET status=%s, pages_done=0, priority=1, error=NULL "
+            cursor.execute(f"UPDATE users SET status=%s, pages_done=0, priority=%s, error=NULL "
                            f"WHERE id IN ({','.join(['%s'] * len(user_ids))}) AND status=%s "
                            f"AND scraped_at < NOW() - INTERVAL %s HOUR",
-                           (WAITING, *user_ids, DONE, rescrape_hours))
+                           (WAITING, REFRESH, *user_ids, DONE, rescrape_hours))
+
+
+@reconnecting
+def save_fans(connection, user_id, fan_ids):
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM fans WHERE user_id=%s", (user_id,))
+        cursor.executemany("INSERT INTO fans (user_id, fan_id) VALUES (%s, %s)", [(user_id, fan) for fan in fan_ids])
+
+
+@reconnecting
+def get_fans(connection, user_ids):
+    if not user_ids:
+        return []
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT DISTINCT fan_id FROM fans WHERE user_id IN ({','.join(['%s'] * len(user_ids))}) "
+                       f"ORDER BY fan_id", user_ids)
+        return [row[0] for row in cursor.fetchall()]
 
 
 @reconnecting
@@ -337,7 +358,8 @@ def reset_interrupted(connection):
 @reconnecting
 def claim_waiting_user(connection):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT id, pages_done FROM users WHERE status=%s ORDER BY priority DESC, id LIMIT 1", (WAITING,))
+        cursor.execute("SELECT id, pages_done, priority FROM users WHERE status=%s ORDER BY priority DESC, id LIMIT 1",
+                       (WAITING,))
         row = cursor.fetchone()
         if row:
             cursor.execute("UPDATE users SET status=%s WHERE id=%s", (IN_PROGRESS, row[0]))
@@ -346,7 +368,9 @@ def claim_waiting_user(connection):
 
 @reconnecting
 def save_page(connection, user_id, page, page_number):
-    """Stores one parsed ratings page and records it as done for the user."""
+    """Stores one parsed ratings page and records it as done for the user. Returns how many of its ratings were new
+    or changed."""
+    changed = 0
     # Writing films in ID order makes parallel workers lock shared rows in the same order, which avoids most deadlocks.
     ratings = sorted(page.ratings, key=lambda r: r.film_id)
     with connection.cursor() as cursor:
@@ -357,7 +381,7 @@ def save_page(connection, user_id, page, page_number):
                 "year=VALUES(year), kind=VALUES(kind)",
                 [(r.film_id, r.parent_id, r.slug[:1000], r.title[:300], r.year, r.kind[:40]) for r in ratings],
             )
-            cursor.executemany(
+            changed = cursor.executemany(
                 "INSERT INTO ratings (user_id, film_id, stars, rated_on) VALUES (%s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE stars=VALUES(stars), rated_on=VALUES(rated_on)",
                 [(user_id, r.film_id, r.stars, r.rated_on) for r in ratings],
@@ -368,6 +392,7 @@ def save_page(connection, user_id, page, page_number):
             (page.user_slug and page.user_slug[:100], page.user_name and page.user_name[:100], page.page_count, page_number,
              user_id),
         )
+    return changed
 
 
 @reconnecting

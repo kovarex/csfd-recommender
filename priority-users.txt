@@ -1,5 +1,6 @@
 # ČSFD users scraped before everyone else (run-crawl.sh queues them on every run unless already scraped) and scraped
-# again once a day, so their new ratings reach the recommendations.
+# again once a day, so their new ratings reach the recommendations. Their fan clubs on ČSFD (the users who added them
+# to favourites) are treated the same way.
 # One numeric user ID per line; the ID is in the profile URL, e.g. https://www.csfd.cz/uzivatel/63015-kovarex/
 63015    # kovarex
 205143   # Chorec

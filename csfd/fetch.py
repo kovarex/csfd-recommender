@@ -35,6 +35,10 @@ def ratings_url(user_id, page=1):
     return f"{BASE_URL}/uzivatel/{user_id}/hodnoceni/" + (f"?page={page}" if page > 1 else "")
 
 
+def profile_url(user_id):
+    return f"{BASE_URL}/uzivatel/{user_id}/prehled/"
+
+
 class RateLimiter:
     """Spaces requests at least 1/rate seconds apart, across all threads."""
 

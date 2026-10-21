@@ -14,8 +14,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import db, export, genres
-from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, ratings_url
-from .parse import NotRatingsPage, parse_ratings_page
+from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, profile_url, ratings_url
+from .parse import NotRatingsPage, parse_fanclub, parse_ratings_page
 
 DEFAULT_CONFIG = os.path.expanduser("~/csfd-config.ini")
 log = logging.getLogger("csfd")
@@ -130,7 +130,7 @@ class Crawler:
         finally:
             connection.close()
 
-    def scrape_user(self, connection, user_id, pages_done):
+    def scrape_user(self, connection, user_id, pages_done, priority=0):
         page_number = pages_done + 1
         try:
             while True:
@@ -138,11 +138,13 @@ class Crawler:
                     db.release_user(connection, user_id)
                     return
                 page = parse_ratings_page(self.fetcher.get(ratings_url(user_id, page_number)))
-                db.save_page(connection, user_id, page, page_number)
+                changed = db.save_page(connection, user_id, page, page_number)
                 with self.stats_lock:
                     self.stats["ratings"] += len(page.ratings)
                 if page_number >= page.page_count or not page.ratings:
                     break
+                if priority == db.REFRESH and not changed:
+                    break  # The older pages were stored the last time.
                 page_number += 1
         except NotFound:
             db.finish_user(connection, user_id, db.MISSING)
@@ -206,6 +208,9 @@ def main():
     prioritize.add_argument("file", help="one numeric ČSFD user ID per line, # starts a comment")
     prioritize.add_argument("--rescrape-hours", type=float,
                             help="also scrape again listed users scraped longer ago than this")
+    prioritize.add_argument("--fans-max-age-hours", type=float,
+                            help="also prioritize the listed users' fan clubs, read from their profiles when the last "
+                                 "reading is older than this")
     sub.add_parser("stats", help="show what is in the database")
     genres_parser = sub.add_parser("genres", help="download film genres from Wikidata into the film_genres table")
     genres_parser.add_argument("--max-age-hours", type=float, default=0,
@@ -255,15 +260,31 @@ def main():
             log.exception("Could not clear the start")
 
 
+def make_fetcher(config):
+    crawl = config["crawl"] if config.has_section("crawl") else {}
+    return ScrapeDoFetcher(config["scrape_do"]["token"], rate=float(crawl.get("rate", 2)),
+                           render=crawl.get("render", "auto"))
+
+
+def read_fans(connection, fetcher, user_ids):
+    """Stores the fan club of each user; a profile that can't be read keeps the fans read the last time."""
+    for user_id in user_ids:
+        try:
+            fans = parse_fanclub(fetcher.get(profile_url(user_id)))
+        except (FetchError, NotFound, NotRatingsPage) as e:
+            log.warning("Fans of user %s not read: %s", user_id, e)
+            continue
+        db.save_fans(connection, user_id, fans)
+        log.info("User %s has %s fan(s)", user_id, len(fans))
+
+
 def run_command(args, config):
     if args.command == "run":
         if args.rate:
             config["crawl"]["rate"] = str(args.rate)
         if args.workers:
             config["crawl"]["workers"] = str(args.workers)
-        fetcher = ScrapeDoFetcher(config["scrape_do"]["token"], rate=float(config["crawl"].get("rate", 2)),
-                                  render=config["crawl"].get("render", "auto"))
-        Crawler(config, fetcher).run(args.minutes)
+        Crawler(config, make_fetcher(config)).run(args.minutes)
     elif args.command == "add":
         connection = db.connect(config)
         db.create_schema(connection)
@@ -275,7 +296,13 @@ def run_command(args, config):
             user_ids = [int(line.split("#")[0]) for line in f if line.split("#")[0].strip()]
         connection = db.connect(config)
         db.create_schema(connection)
+        if args.fans_max_age_hours is not None:
+            if time.time() - int(db.get_state(connection, "fans_at", 0)) >= args.fans_max_age_hours * 3600:
+                read_fans(connection, make_fetcher(config), user_ids)
+                db.set_state(connection, "fans_at", int(time.time()))
+            user_ids = list(dict.fromkeys(user_ids + db.get_fans(connection, user_ids)))
         db.prioritize_users(connection, user_ids, args.rescrape_hours)
+        print(f"Prioritized {len(user_ids)} user(s).")
     elif args.command == "film-stats":
         connection = db.connect(config)
         db.create_schema(connection)

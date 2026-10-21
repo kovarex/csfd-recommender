@@ -13,7 +13,7 @@ python3 -m pip install -q --user -r requirements.txt >> "$LOG" 2>&1
 sh deploy-web.sh >> "$LOG" 2>&1
 # Each preparation step gets a time limit, so a slow one can't take the whole scheduled task from the scraping.
 limit() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
-limit 60 python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 24 >> "$LOG" 2>&1
+limit 150 python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 24 --fans-max-age-hours 24 >> "$LOG" 2>&1
 limit 420 python3 -m csfd.crawl film-stats --max-age-hours 4 --retry-hours 1 >> "$LOG" 2>&1
 limit 180 python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
 limit 180 python3 -m csfd.crawl series-stats --max-age-hours 24 >> "$LOG" 2>&1

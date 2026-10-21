@@ -8,9 +8,9 @@ from decimal import Decimal
 import pymysql
 
 from csfd import db
-from csfd.crawl import Crawler
-from csfd.fetch import Blocked, ChallengeNotSolved, NotFound, ScrapeDoFetcher
-from csfd.parse import NotRatingsPage, Rating, RatingsPage, parse_ratings_page
+from csfd.crawl import Crawler, read_fans
+from csfd.fetch import Blocked, ChallengeNotSolved, NotFound, ScrapeDoFetcher, profile_url
+from csfd.parse import NotRatingsPage, Rating, RatingsPage, parse_fanclub, parse_ratings_page
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -51,6 +51,14 @@ def ratings_page(user_id, page, page_count, films):
             f'<div class="pagination">{pagination}</div>')
 
 
+def profile_page(user_id, fan_ids):
+    fans = "".join(f'<li><a href="/uzivatel/{fan}-fan{fan}/prehled/">fan{fan}</a></li>' for fan in fan_ids)
+    return (f'<link rel="canonical" href="https://www.csfd.cz/uzivatel/{user_id}-u{user_id}/prehled/">'
+            f'<a href="/uzivatel/{user_id}-u{user_id}/hodnoceni/">Hodnocení</a>'
+            f'<section class="fanclub" id="snippet--fanclub"><h3>Fanklub ({len(fan_ids)})</h3><ul>{fans}</ul></section>'
+            f'<section><a href="/uzivatel/99-other/prehled/">other</a></section>')
+
+
 class FakeFetcher:
     def __init__(self, pages, credits=10000):
         self.pages = pages
@@ -77,6 +85,12 @@ def url(user_id, page=1):
 
 
 class ParseTest(unittest.TestCase):
+    def test_parses_the_fan_club_of_a_profile(self):
+        self.assertEqual(parse_fanclub(profile_page(1, [5, 6, 5])), [5, 6])
+        self.assertEqual(parse_fanclub('<link rel="canonical" href="https://www.csfd.cz/uzivatel/1-u/prehled/">'), [])
+        with self.assertRaises(NotRatingsPage):
+            parse_fanclub("<title>Making sure you&#39;re not a bot!</title>")
+
     def test_real_ratings_page(self):
         page = parse_ratings_page(fixture("user-ratings.html"))
         self.assertEqual(page.user_id, 912)
@@ -186,7 +200,7 @@ class CrawlTest(unittest.TestCase):
         self.config = test_config()
         self.connection = db.connect(self.config)
         with self.connection.cursor() as cursor:
-            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres", "series_stats"):
+            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres", "series_stats", "fans"):
                 cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     def tearDown(self):
@@ -225,6 +239,26 @@ class CrawlTest(unittest.TestCase):
         self.crawl(fetcher)
         self.assertIn(url(3), fetcher.urls)
         self.assertNotIn(url(2), fetcher.urls)
+
+    def test_refresh_stops_at_the_first_page_without_new_ratings(self):
+        pages = {url(1, p): ratings_page(1, p, 3, [(100 + p, "stars-4")]) for p in (1, 2, 3)}
+        self.crawl(FakeFetcher(pages))
+        pages[url(1)] = ratings_page(1, 1, 4, [(200, "stars-5")])  # A new rating pushes the rest a page further.
+        pages[url(1, 2)] = ratings_page(1, 2, 4, [(101, "stars-4")])
+        db.prioritize_users(self.connection, [1], rescrape_hours=-1)
+        fetcher = FakeFetcher(pages)
+        self.crawl(fetcher)
+        self.assertEqual(fetcher.urls[:2], [url(1), url(1, 2)])
+        self.assertNotIn(url(1, 3), fetcher.urls)
+        self.assertEqual(self.query("SELECT status, rating_count FROM users WHERE id=1"), ((db.DONE, 4),))
+
+    def test_prioritizes_fans_read_from_profiles(self):
+        db.create_schema(self.connection)
+        fetcher = FakeFetcher({profile_url(1): profile_page(1, [5, 6]), profile_url(2): NotFound(profile_url(2))})
+        read_fans(self.connection, fetcher, [1, 2])
+        self.assertEqual(db.get_fans(self.connection, [1, 2]), [5, 6])
+        read_fans(self.connection, FakeFetcher({profile_url(1): profile_page(1, [6])}), [1])
+        self.assertEqual(db.get_fans(self.connection, [1]), [6])
 
     def test_next_run_continues_where_the_last_one_stopped(self):
         pages = {url(1, p): ratings_page(1, p, 3, [(100 + p, "stars-4")]) for p in (1, 2, 3)}
@@ -339,7 +373,9 @@ class CrawlTest(unittest.TestCase):
             cursor.execute("UPDATE users SET status=%s, scraped_at=NOW() WHERE id=2", (db.DONE,))
         db.prioritize_users(self.connection, [1, 2], rescrape_hours=24)
         self.assertEqual(self.query("SELECT id, status, priority, pages_done FROM users ORDER BY id"),
-                         ((1, db.WAITING, 1, 0), (2, db.DONE, 0, 0)))
+                         ((1, db.WAITING, db.REFRESH, 0), (2, db.DONE, 0, 0)))
+        db.prioritize_users(self.connection, [1, 2])  # The next run keeps it a refresh.
+        self.assertEqual(self.query("SELECT priority FROM users WHERE id=1"), ((db.REFRESH,),))
 
     def test_series_stats_measure_how_differently_a_viewer_rates_episodes(self):
         db.create_schema(self.connection)
