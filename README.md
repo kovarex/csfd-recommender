@@ -80,7 +80,7 @@ The steps by hand:
 
 Genres aren't on the ratings pages, so they come from Wikidata, which links ~330 000 items to ČSFD IDs:
 `run-crawl.sh` downloads them weekly into the `film_genres` table (`python3 -m csfd.crawl genres`; 20 broad genres:
-scifi, fantasy, horor, thriller, krimi, akcni, komedie, drama, …, see `csfd/genres.py`), the export includes them,
+scifi, fantasy, horor, thriller, krimi, akcni, komedie, drama, …, antologie, see `csfd/genres.py`), the export includes them,
 and `ml.recommend … --genre scifi` (or `scifi,fantasy`) filters by them. The web film list filters by genre too.
 
 `ml.train` holds out 5 % of the ratings and prints the error on them (RMSE in stars) after every epoch, next to the

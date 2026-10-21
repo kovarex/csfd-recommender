@@ -8,13 +8,17 @@ const GENRE_NAMES = ['scifi' => 'sci-fi', 'fantasy' => 'fantasy', 'horor' => 'ho
   'krimi' => 'krimi', 'akcni' => 'akční', 'dobrodruzny' => 'dobrodružný', 'komedie' => 'komedie', 'drama' => 'drama',
   'romanticky' => 'romantický', 'animovany' => 'animovaný', 'anime' => 'anime', 'dokumentarni' => 'dokumentární',
   'valecny' => 'válečný', 'western' => 'western', 'historicky' => 'historický', 'zivotopisny' => 'životopisný',
-  'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní'];
+  'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní', 'antologie' => 'antologie'];
 // Not a ČSFD kind: the episodes of series that are anthologies (see allowed_films in index.php).
 const ANTHOLOGY_EPISODE = 'antologická epizoda';
-// A series counts as an anthology when its viewers' ratings of its episodes spread at least this much (stars), measured
-// over at least this many viewers. Provisional until checked on known series.
-const ANTHOLOGY_MIN_SPREAD = 1.0;
+// A series counts as an anthology when Wikidata says so (genre "antologie") and the same viewer rates its episodes
+// differently enough (series_stats.spread, over at least ANTHOLOGY_MIN_USERS viewers). Wikidata also calls season
+// anthologies like True Detective or The White Lotus anthologies, where a season is one story; their spread was
+// 0.44-0.60, against 0.65-0.86 for Love, Death & Robots, Black Mirror, Inside No. 9 or The Twilight Zone (21 Oct 2026).
+const ANTHOLOGY_MIN_SPREAD = 0.62;
 const ANTHOLOGY_MIN_USERS = 20;
+// Anthologies Wikidata doesn't mark: ČSFD IDs.
+const EXTRA_ANTHOLOGIES = [1193901 /* Kabinet kuriozit Guillerma del Tora */];
 // Kinds the recommendations show unless others are chosen. Concerts, nature series and the like are rated mostly by
 // their fans, so their high averages say little about anyone else, and they crowded the top of the list.
 const DEFAULT_RECOMMEND_KINDS = ['film', 'TV film', 'seriál', ANTHOLOGY_EPISODE];

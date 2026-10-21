@@ -277,10 +277,12 @@ def run_command(args, config):
         connection = db.connect(config)
         db.create_schema(connection)
         last = int(db.get_state(connection, "genres_at", 0))
-        if time.time() - last >= args.max_age_hours * 3600:
+        outdated = db.get_state(connection, "genres_version") != str(genres.VERSION)
+        if outdated or time.time() - last >= args.max_age_hours * 3600:
             started = time.time()
             film_genres = genres.download()
             db.save_genres(connection, film_genres)
+            db.set_state(connection, "genres_version", genres.VERSION)
             print(f"Genres of {len(film_genres)} films saved in {time.time() - started:.0f} s.")
     elif args.command == "export":
         export.export(db.connect(config), args.dir)

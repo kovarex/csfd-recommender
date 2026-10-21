@@ -9,6 +9,7 @@ table (run-crawl.sh refreshes it weekly); the export includes them as genres.csv
 import csv
 import io
 import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -37,14 +38,24 @@ GENRES = {
     "muzikal": ["Q842256"],
     "rodinny": ["Q1361932"],
     "mysteriozni": ["Q1200678"],
+    # Anthology series; the web offers their episodes one by one (with the spread in series_stats as a check).
+    "antologie": ["Q23653"],
 }
+# Raise when the genres change, so the next run downloads them again instead of waiting a week.
+VERSION = 2
 
 
-def sparql(query):
+def sparql(query, attempts=3):
     request = urllib.request.Request(SPARQL_URL, data=urllib.parse.urlencode({"query": query}).encode(),
                                      headers={"Accept": "text/csv", "User-Agent": "csfd-recommender/0.1"})
-    with urllib.request.urlopen(request, timeout=180) as response:
-        return list(csv.DictReader(io.StringIO(response.read().decode("utf-8"))))
+    for attempt in range(attempts):
+        with urllib.request.urlopen(request, timeout=180) as response:
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8"))))
+        # A response cut off by a server timeout ends with an incomplete row; ask again rather than lose data.
+        if all(None not in row.values() for row in rows):
+            return rows
+        time.sleep(10 * (attempt + 1))
+    raise RuntimeError("Wikidata kept returning incomplete results")
 
 
 def qid(uri):
@@ -84,5 +95,10 @@ def download():
         return ancestors[genre]
 
     roots = {root: name for name, items in GENRES.items() for root in items}
-    return {film: {roots[a] for g in genres for a in ancestors_of(g) if a in roots}
-            for film, genres in film_genres.items()}
+    result = {film: {roots[a] for g in genres for a in ancestors_of(g) if a in roots}
+              for film, genres in film_genres.items()}
+    # Some series are marked as anthologies by "instance of" rather than by genre.
+    for row in sparql("SELECT ?csfd WHERE { ?item wdt:P2529 ?csfd ; wdt:P31 wd:Q23653 . }"):
+        if row["csfd"].isdigit():
+            result.setdefault(int(row["csfd"]), set()).add("antologie")
+    return result

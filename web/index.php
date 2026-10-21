@@ -302,9 +302,8 @@ function recommended_films(array $model, array $taste, int $userId, string $list
 }
 
 /**
- * [film ID => true] for the chosen kinds. ANTHOLOGY_EPISODE stands for the episodes of anthologies (series whose
- * episodes the same viewer rates very differently, see series_stats); such series are then offered by episode
- * instead of as a whole.
+ * [film ID => true] for the chosen kinds. ANTHOLOGY_EPISODE stands for the episodes of anthologies (see
+ * ANTHOLOGY_MIN_SPREAD); such series are then offered by episode instead of as a whole.
  */
 function allowed_films(array $kinds): array
 {
@@ -313,8 +312,9 @@ function allowed_films(array $kinds): array
     implode(',', array_fill(0, count($real), '?')) . ')', $real), 'film_id'))) : [];
   if (in_array(ANTHOLOGY_EPISODE, $kinds, true))
   {
-    $anthologies = array_map('intval', array_column(query('SELECT series_id FROM series_stats WHERE users >= ? AND spread >= ?',
-      [ANTHOLOGY_MIN_USERS, ANTHOLOGY_MIN_SPREAD]), 'series_id'));
+    $anthologies = array_merge(EXTRA_ANTHOLOGIES, array_map('intval', array_column(query(
+      "SELECT s.series_id FROM series_stats s JOIN film_genres g ON g.film_id=s.series_id AND g.genre='antologie'
+       WHERE s.users >= ? AND s.spread >= ?", [ANTHOLOGY_MIN_USERS, ANTHOLOGY_MIN_SPREAD]), 'series_id')));
     if ($anthologies)
     {
       $list = implode(',', $anthologies);
