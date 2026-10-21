@@ -9,8 +9,15 @@ const GENRE_NAMES = ['scifi' => 'sci-fi', 'fantasy' => 'fantasy', 'horor' => 'ho
   'romanticky' => 'romantický', 'animovany' => 'animovaný', 'anime' => 'anime', 'dokumentarni' => 'dokumentární',
   'valecny' => 'válečný', 'western' => 'western', 'historicky' => 'historický', 'zivotopisny' => 'životopisný',
   'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní'];
-// Kinds the recommendations show unless another is chosen.
-const DEFAULT_RECOMMEND_KINDS = 'film,seriál';
+// Not a ČSFD kind: the episodes of series that are anthologies (see allowed_films in index.php).
+const ANTHOLOGY_EPISODE = 'antologická epizoda';
+// A series counts as an anthology when its viewers' ratings of its episodes spread at least this much (stars), measured
+// over at least this many viewers. Provisional until checked on known series.
+const ANTHOLOGY_MIN_SPREAD = 1.0;
+const ANTHOLOGY_MIN_USERS = 20;
+// Kinds the recommendations show unless others are chosen. Concerts, nature series and the like are rated mostly by
+// their fans, so their high averages say little about anyone else, and they crowded the top of the list.
+const DEFAULT_RECOMMEND_KINDS = ['film', 'TV film', 'seriál', ANTHOLOGY_EPISODE];
 // Lists on the recommendations page: key => [tab label, explanation].
 const RECOMMEND_LISTS = [
   'best' => ['Nejlepší pro tebe', 'Filmy s nejvyšším odhadem hodnocení.'],

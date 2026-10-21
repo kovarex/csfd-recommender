@@ -213,18 +213,15 @@ function recommend_page(int $id): void
   $list = isset(RECOMMEND_LISTS[$_GET['list'] ?? '']) ? $_GET['list'] : 'best';
   $genre = isset(GENRE_NAMES[$_GET['genre'] ?? '']) ? $_GET['genre'] : '';
   $min = max(1, (int)($_GET['min'] ?? 100));
-  // Only films by default: concerts, nature series and the like are rated mostly by their fans, so they get high
-  // averages that say little about how anyone else would like them, and they crowded the top of the list.
-  // Films and whole series by default; a series' episodes are listed separately (series=<ID>), which helps with
-  // anthologies like Love, Death & Robots, where every episode is a film of its own.
-  $kind = $_GET['kind'] ?? DEFAULT_RECOMMEND_KINDS;
-  if ($kind !== '' && $kind !== DEFAULT_RECOMMEND_KINDS && !in_array($kind, film_kinds(), true))
-    $kind = DEFAULT_RECOMMEND_KINDS;
+  // Kinds are checkboxes; k=1 marks a submitted form, so unchecking everything isn't mistaken for the defaults.
+  $allKinds = array_values(array_unique(array_merge(DEFAULT_RECOMMEND_KINDS, film_kinds())));
+  $kinds = isset($_GET['k']) ? array_values(array_intersect($allKinds, (array)($_GET['kind'] ?? []))) : DEFAULT_RECOMMEND_KINDS;
   $series = (int)($_GET['series'] ?? 0);
+  $filters = ['genre' => $genre, 'min' => $_GET['min'] ?? null] + (isset($_GET['k']) ? ['k' => 1, 'kind' => $kinds] : []);
   $tabs = [];
   foreach (RECOMMEND_LISTS as $key => [$label])
     $tabs[] = $key === $list ? '<b>' . h($label) . '</b>'
-                             : '<a href="' . h(url(['view' => 'recommend', 'id' => $id, 'list' => $key, 'genre' => $genre, 'kind' => $_GET['kind'] ?? null, 'min' => $_GET['min'] ?? null])) . '">' . h($label) . '</a>';
+                             : '<a href="' . h(url(['view' => 'recommend', 'id' => $id, 'list' => $key] + $filters)) . '">' . h($label) . '</a>';
   echo '<p><a href="' . h(url(['view' => 'user', 'id' => $id])) . '">← hodnocení uživatele</a></p>';
   echo '<p class="filters">' . implode(' · ', $tabs) . '</p>';
   echo '<p class="note">' . h(RECOMMEND_LISTS[$list][1]) . '</p>';
@@ -249,12 +246,11 @@ function recommend_page(int $id): void
     ?>
     <form class="filters">
       <input type="hidden" name="view" value="recommend"><input type="hidden" name="id" value="<?= $id ?>">
-      <input type="hidden" name="list" value="<?= h($list) ?>">
-      typ <select name="kind"><option value="<?= h(DEFAULT_RECOMMEND_KINDS) ?>">film a seriál</option>
-        <option value="" <?= $kind === '' ? 'selected' : '' ?>>vše</option>
-        <?php foreach (film_kinds() as $k): ?>
-          <option <?= $k === $kind ? 'selected' : '' ?>><?= h($k) ?></option>
-        <?php endforeach ?></select>
+      <input type="hidden" name="list" value="<?= h($list) ?>"><input type="hidden" name="k" value="1">
+      <span class="kinds">typ
+        <?php foreach ($allKinds as $k): ?>
+          <label><input type="checkbox" name="kind[]" value="<?= h($k) ?>" <?= in_array($k, $kinds, true) ? 'checked' : '' ?>> <?= h($k) ?></label>
+        <?php endforeach ?></span>
       žánr <select name="genre"><option value="">vše</option>
         <?php foreach (GENRE_NAMES as $key => $genreName): ?>
           <option value="<?= h($key) ?>" <?= $key === $genre ? 'selected' : '' ?>><?= h($genreName) ?></option>
@@ -263,7 +259,7 @@ function recommend_page(int $id): void
       <button>Zobrazit</button>
     </form>
     <?php
-    recommended_films($model, $taste, $id, $list, $ratings, $genre, $kind, $min);
+    recommended_films($model, $taste, $id, $list, $ratings, $genre, $kinds, $min);
   }
   echo '<p class="note">Model natrénován ' . h(local_time($model['trained_at'])) . ' na ' . n($model['ratings']) .
        ' hodnoceních (průměrná chyba odhadu ' . number_format($model['validation_rmse'], 2, ',', '') . ' hvězdičky). ' .
@@ -271,17 +267,11 @@ function recommend_page(int $id): void
 }
 
 function recommended_films(array $model, array $taste, int $userId, string $list, array $ratings, string $genre,
-                           string $kind, int $min): void
+                           array $kinds, int $min): void
 {
   $idSet = fn(string $sql, string $value): array => array_flip(array_map('intval', array_column(query($sql, [$value]), 'film_id')));
   $inGenre = $genre !== '' ? $idSet('SELECT film_id FROM film_genres WHERE genre=?', $genre) : null;
-  $ofKind = null;
-  if ($kind !== '')
-  {
-    $kinds = explode(',', $kind);
-    $ofKind = array_flip(array_map('intval', array_column(query('SELECT film_id FROM film_stats WHERE kind IN (' .
-      implode(',', array_fill(0, count($kinds), '?')) . ')', $kinds), 'film_id')));
-  }
+  $ofKind = allowed_films($kinds);
   $scores = score_films($model, $taste);
   $ranked = [];
   foreach ($scores as $i => [$predicted, $cosine])
@@ -302,6 +292,33 @@ function recommended_films(array $model, array $taste, int $userId, string $list
     return;
   }
   prediction_table($model, $scores, array_keys($top), $ratings, $userId);
+}
+
+/**
+ * [film ID => true] for the chosen kinds. ANTHOLOGY_EPISODE stands for the episodes of anthologies (series whose
+ * episodes the same viewer rates very differently, see series_stats); such series are then offered by episode
+ * instead of as a whole.
+ */
+function allowed_films(array $kinds): array
+{
+  $real = array_values(array_diff($kinds, [ANTHOLOGY_EPISODE]));
+  $allowed = $real ? array_flip(array_map('intval', array_column(query('SELECT film_id FROM film_stats WHERE kind IN (' .
+    implode(',', array_fill(0, count($real), '?')) . ')', $real), 'film_id'))) : [];
+  if (in_array(ANTHOLOGY_EPISODE, $kinds, true))
+  {
+    $anthologies = array_map('intval', array_column(query('SELECT series_id FROM series_stats WHERE users >= ? AND spread >= ?',
+      [ANTHOLOGY_MIN_USERS, ANTHOLOGY_MIN_SPREAD]), 'series_id'));
+    if ($anthologies)
+    {
+      $list = implode(',', $anthologies);
+      foreach (query("SELECT id FROM films WHERE kind='epizoda' AND (parent_id IN ($list)
+                      OR parent_id IN (SELECT id FROM films WHERE parent_id IN ($list)))") as $r)
+        $allowed[(int)$r['id']] = true;
+      foreach ($anthologies as $seriesId)
+        unset($allowed[$seriesId]);
+    }
+  }
+  return $allowed;
 }
 
 /** Episodes of a series ranked by the prediction for the user, including the ones they rated. */

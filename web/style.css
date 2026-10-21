@@ -31,3 +31,4 @@ small, .note, .pager { color: var(--muted); }
 a.sort { color: inherit; text-decoration: none; }
 a.sort:hover { text-decoration: underline; }
 .filters input.wide { width: 240px; }
+.kinds label { white-space: nowrap; margin-right: 6px; }
