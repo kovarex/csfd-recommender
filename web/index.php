@@ -226,7 +226,11 @@ function recommend_page(int $id): void
   $allKinds = array_values(array_unique(array_merge(DEFAULT_RECOMMEND_KINDS, film_kinds())));
   $kinds = isset($_GET['k']) ? array_values(array_intersect($allKinds, (array)($_GET['kind'] ?? []))) : DEFAULT_RECOMMEND_KINDS;
   $series = (int)($_GET['series'] ?? 0);
-  $filters = ['genre' => $genre, 'min' => $_GET['min'] ?? null] + (isset($_GET['k']) ? ['k' => 1, 'kind' => $kinds] : []);
+  // Documentaries are off by default, like in ČSFD's rankings: their few viewers seek them out and rate them highly,
+  // so the model rates them above almost everything for everyone.
+  $documentaries = !empty($_GET['docs']) || $genre === 'dokumentarni';
+  $filters = ['genre' => $genre, 'min' => $_GET['min'] ?? null, 'docs' => $documentaries ? 1 : null]
+             + (isset($_GET['k']) ? ['k' => 1, 'kind' => $kinds] : []);
   $tabs = [];
   foreach (RECOMMEND_LISTS as $key => [$label])
     $tabs[] = $key === $list ? '<b>' . h($label) . '</b>'
@@ -260,6 +264,7 @@ function recommend_page(int $id): void
         <?php foreach ($allKinds as $k): ?>
           <label><input type="checkbox" name="kind[]" value="<?= h($k) ?>" <?= in_array($k, $kinds, true) ? 'checked' : '' ?>> <?= h($k) ?></label>
         <?php endforeach ?></span>
+      <span class="kinds"><label><input type="checkbox" name="docs" value="1" <?= $documentaries ? 'checked' : '' ?>> dokumenty</label></span>
       žánr <select name="genre"><option value="">vše</option>
         <?php foreach (GENRE_NAMES as $key => $genreName): ?>
           <option value="<?= h($key) ?>" <?= $key === $genre ? 'selected' : '' ?>><?= h($genreName) ?></option>
@@ -268,7 +273,7 @@ function recommend_page(int $id): void
       <button>Zobrazit</button>
     </form>
     <?php
-    recommended_films($model, $taste, $id, $list, $ratings, $genre, $kinds, $min);
+    recommended_films($model, $taste, $id, $list, $ratings, $genre, $kinds, $min, $documentaries);
   }
   echo '<p class="note">Model natrénován ' . h(local_time($model['trained_at'])) . ' na ' . n($model['ratings']) .
        ' hodnoceních (průměrná chyba odhadu ' . number_format($model['validation_rmse'], 2, ',', '') . ' hvězdičky). ' .
@@ -276,10 +281,11 @@ function recommend_page(int $id): void
 }
 
 function recommended_films(array $model, array $taste, int $userId, string $list, array $ratings, string $genre,
-                           array $kinds, int $min): void
+                           array $kinds, int $min, bool $documentaries): void
 {
   $idSet = fn(string $sql, string $value): array => array_flip(array_map('intval', array_column(query($sql, [$value]), 'film_id')));
   $inGenre = $genre !== '' ? $idSet('SELECT film_id FROM film_genres WHERE genre=?', $genre) : null;
+  $hidden = $documentaries ? [] : $idSet('SELECT film_id FROM film_genres WHERE genre=?', 'dokumentarni');
   $ofKind = allowed_films($kinds);
   $scores = score_films($model, $taste);
   $ranked = [];
@@ -287,7 +293,8 @@ function recommended_films(array $model, array $taste, int $userId, string $list
   {
     $filmId = $model['film_ids'][$i];
     if ($model['film_counts'][$i] < $min || isset($ratings[$filmId])
-        || ($inGenre !== null && !isset($inGenre[$filmId])) || ($ofKind !== null && !isset($ofKind[$filmId])))
+        || ($inGenre !== null && !isset($inGenre[$filmId])) || ($ofKind !== null && !isset($ofKind[$filmId]))
+        || isset($hidden[$filmId]))
       continue;
     $difference = clip_stars($predicted) - clip_stars($model['film_average'][$i]);
     $ranked[$i] = ['best' => $predicted, 'above' => $difference, 'below' => -$difference, 'match' => $cosine,
