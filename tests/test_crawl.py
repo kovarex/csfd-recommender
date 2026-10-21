@@ -319,6 +319,17 @@ class CrawlTest(unittest.TestCase):
         self.assertEqual(self.query("SELECT id, status, priority FROM users ORDER BY id"),
                          ((1, db.WAITING, 1), (2, db.DONE, 0), (7, db.WAITING, 1)))
 
+    def test_prioritize_rescrapes_users_scraped_long_ago(self):
+        db.create_schema(self.connection)
+        db.add_users(self.connection, [1, 2])
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE users SET status=%s, pages_done=3, scraped_at=NOW() - INTERVAL 2 DAY WHERE id=1",
+                           (db.DONE,))
+            cursor.execute("UPDATE users SET status=%s, scraped_at=NOW() WHERE id=2", (db.DONE,))
+        db.prioritize_users(self.connection, [1, 2], rescrape_hours=24)
+        self.assertEqual(self.query("SELECT id, status, priority, pages_done FROM users ORDER BY id"),
+                         ((1, db.WAITING, 1, 0), (2, db.DONE, 0, 0)))
+
     def test_hand_added_user_goes_first_and_can_be_rescraped(self):
         pages = {url(500): ratings_page(500, 1, 1, [(100, "stars-2")])}
         db.create_schema(self.connection)

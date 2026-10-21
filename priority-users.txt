@@ -1,4 +1,5 @@
-# ČSFD users scraped before everyone else (run-crawl.sh queues them on every run unless they are already scraped).
+# ČSFD users scraped before everyone else (run-crawl.sh queues them on every run unless already scraped) and scraped
+# again once a day, so their new ratings reach the recommendations.
 # One numeric user ID per line; the ID is in the profile URL, e.g. https://www.csfd.cz/uzivatel/63015-kovarex/
 63015    # kovarex
 205143   # Chorec

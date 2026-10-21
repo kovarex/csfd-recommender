@@ -188,6 +188,8 @@ def main():
     add.add_argument("user_ids", type=int, nargs="+")
     prioritize = sub.add_parser("prioritize", help="scrape the users listed in a file first, unless already scraped")
     prioritize.add_argument("file", help="one numeric ČSFD user ID per line, # starts a comment")
+    prioritize.add_argument("--rescrape-hours", type=float,
+                            help="also scrape again listed users scraped longer ago than this")
     sub.add_parser("stats", help="show what is in the database")
     genres_parser = sub.add_parser("genres", help="download film genres from Wikidata into the film_genres table")
     genres_parser.add_argument("--max-age-hours", type=float, default=0,
@@ -221,7 +223,7 @@ def main():
             user_ids = [int(line.split("#")[0]) for line in f if line.split("#")[0].strip()]
         connection = db.connect(config)
         db.create_schema(connection)
-        db.prioritize_users(connection, user_ids)
+        db.prioritize_users(connection, user_ids, args.rescrape_hours)
     elif args.command == "film-stats":
         connection = db.connect(config)
         db.create_schema(connection)

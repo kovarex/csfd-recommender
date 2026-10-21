@@ -222,12 +222,18 @@ def add_users(connection, user_ids):
 
 
 @reconnecting
-def prioritize_users(connection, user_ids):
-    """Moves users to the front of the queue unless they are already scraped; safe to repeat on every run."""
+def prioritize_users(connection, user_ids, rescrape_hours=None):
+    """Moves users to the front of the queue unless they are already scraped; with rescrape_hours, also users
+    scraped longer ago than that, so their new ratings show up. Safe to repeat on every run."""
     with connection.cursor() as cursor:
         cursor.executemany("INSERT INTO users (id, priority) VALUES (%s, 1) "
                            "ON DUPLICATE KEY UPDATE priority = IF(status = %s, priority, 1)",
                            [(user_id, DONE) for user_id in user_ids])
+        if rescrape_hours is not None and user_ids:
+            cursor.execute(f"UPDATE users SET status=%s, pages_done=0, priority=1, error=NULL "
+                           f"WHERE id IN ({','.join(['%s'] * len(user_ids))}) AND status=%s "
+                           f"AND scraped_at < NOW() - INTERVAL %s HOUR",
+                           (WAITING, *user_ids, DONE, rescrape_hours))
 
 
 @reconnecting
