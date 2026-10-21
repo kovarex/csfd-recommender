@@ -42,6 +42,22 @@ class NotRatingsPage(Exception):
     """The HTML is not a ratings page (anti-bot challenge, error page, changed layout...)."""
 
 
+GENRE_LINK_RE = re.compile(r'<a href="/zanry/\d+-([^/"]+)/"')
+FILM_PAGE_RE = re.compile(r'<link rel="canonical" href="https://www\.csfd\.cz/film/')
+
+
+def parse_film_genres(page_html):
+    """Genres of a film page (https://www.csfd.cz/film/<id>/prehled/) as URL slugs without dashes, e.g. "dokumentarni"
+    or "scifi", which are the genre names in film_genres."""
+    if not FILM_PAGE_RE.search(page_html):
+        raise NotRatingsPage("not a film page")
+    start = page_html.find('<div class="genres">')
+    if start < 0:
+        return []
+    box = page_html[start:page_html.find("</div>", start)]
+    return list(dict.fromkeys(slug.replace("-", "")[:20] for slug in GENRE_LINK_RE.findall(box)))
+
+
 FAN_RE = re.compile(r'<a href="/uzivatel/(\d+)-[^/"]*/')
 PROFILE_RE = re.compile(r'<link rel="canonical" href="https://www\.csfd\.cz/uzivatel/\d+-[^/"]*/prehled/')
 

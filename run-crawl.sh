@@ -17,6 +17,8 @@ limit 150 python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 2
 limit 420 python3 -m csfd.crawl film-stats --max-age-hours 4 --retry-hours 1 >> "$LOG" 2>&1
 limit 180 python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
 limit 180 python3 -m csfd.crawl series-stats --max-age-hours 24 >> "$LOG" 2>&1
+# Genres from ČSFD film pages (Wikidata lacks many, e.g. documentaries), a few hundred of the best rated films a run.
+limit 150 python3 -m csfd.crawl film-genres --pages 400 --rate "${CSFD_RATE:-5}" --workers "${CSFD_WORKERS:-8}" >> "$LOG" 2>&1
 LEFT=$(( ${CSFD_MINUTES:-11} * 60 - $(date +%s) + START ))
 if [ "$LEFT" -lt 60 ]; then
   echo "$(date) no time left for scraping after the preparation steps" >> "$LOG"

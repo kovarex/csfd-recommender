@@ -8,9 +8,9 @@ from decimal import Decimal
 import pymysql
 
 from csfd import db
-from csfd.crawl import Crawler, read_fans
-from csfd.fetch import Blocked, ChallengeNotSolved, NotFound, ScrapeDoFetcher, profile_url
-from csfd.parse import NotRatingsPage, Rating, RatingsPage, parse_fanclub, parse_ratings_page
+from csfd.crawl import Crawler, read_fans, read_film_genres
+from csfd.fetch import Blocked, ChallengeNotSolved, NotFound, ScrapeDoFetcher, film_url, profile_url
+from csfd.parse import NotRatingsPage, Rating, RatingsPage, parse_fanclub, parse_film_genres, parse_ratings_page
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -59,6 +59,12 @@ def profile_page(user_id, fan_ids):
             f'<section><a href="/uzivatel/99-other/prehled/">other</a></section>')
 
 
+def film_page(film_id, genres):
+    links = ' <span class="bullet"></span> '.join(f'<a href="/zanry/{i}-{slug}/">{slug}</a>' for i, slug in enumerate(genres))
+    return (f'<link rel="canonical" href="https://www.csfd.cz/film/{film_id}-f/prehled/">'
+            f'<div class="genres">{links}</div><div><a href="/zanry/99-horor/">horor</a></div>')
+
+
 class FakeFetcher:
     def __init__(self, pages, credits=10000):
         self.pages = pages
@@ -85,6 +91,11 @@ def url(user_id, page=1):
 
 
 class ParseTest(unittest.TestCase):
+    def test_parses_the_genres_of_a_film_page(self):
+        self.assertEqual(parse_film_genres(film_page(1, ["dokumentarni", "sci-fi"])), ["dokumentarni", "scifi"])
+        with self.assertRaises(NotRatingsPage):
+            parse_film_genres(profile_page(1, []))
+
     def test_parses_the_fan_club_of_a_profile(self):
         self.assertEqual(parse_fanclub(profile_page(1, [5, 6, 5])), [5, 6])
         self.assertEqual(parse_fanclub('<link rel="canonical" href="https://www.csfd.cz/uzivatel/1-u/prehled/">'), [])
@@ -200,7 +211,7 @@ class CrawlTest(unittest.TestCase):
         self.config = test_config()
         self.connection = db.connect(self.config)
         with self.connection.cursor() as cursor:
-            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres", "series_stats", "fans"):
+            for table in ("ratings", "films", "users", "crawl_state", "crawl_runs", "film_stats", "film_genres", "series_stats", "fans", "csfd_genres", "film_pages"):
                 cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     def tearDown(self):
@@ -325,6 +336,22 @@ class CrawlTest(unittest.TestCase):
         db.save_genres(self.connection, {1: {"scifi", "drama"}, 2: {"komedie"}})
         db.save_genres(self.connection, {1: {"scifi"}, 3: set()})
         self.assertEqual(self.query("SELECT film_id, genre FROM film_genres"), ((1, "scifi"),))
+
+    def test_reads_genres_of_the_best_rated_films_from_their_pages(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("INSERT INTO film_stats (film_id, rating_count, average) VALUES "
+                           "(1, 500, 4.9), (2, 500, 4.0), (3, 50, 5.0), (4, 500, 4.5)")
+        self.assertEqual(db.films_without_genres(self.connection, 100, 10), [1, 4, 2])
+        fetcher = FakeFetcher({film_url(1): film_page(1, ["dokumentarni"]), film_url(2): NotFound(film_url(2)),
+                               film_url(4): Blocked(film_url(4))})
+        with self.assertRaises(Blocked):
+            read_film_genres(self.connection, fetcher, [1, 2, 4], 2)
+        read_film_genres(self.connection, fetcher, [1, 2], 2)
+        self.assertEqual(db.films_without_genres(self.connection, 100, 10), [4])
+        db.save_genres(self.connection, {2: {"drama"}})  # The weekly Wikidata download keeps ČSFD's genres.
+        self.assertEqual(self.query("SELECT film_id, genre FROM film_genres ORDER BY film_id"),
+                         ((1, "dokumentarni"), (2, "drama")))
 
     def test_film_stats_copy_the_kind_and_cache_the_kinds(self):
         db.create_schema(self.connection)

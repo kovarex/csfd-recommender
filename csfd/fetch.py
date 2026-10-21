@@ -35,6 +35,10 @@ def ratings_url(user_id, page=1):
     return f"{BASE_URL}/uzivatel/{user_id}/hodnoceni/" + (f"?page={page}" if page > 1 else "")
 
 
+def film_url(film_id):
+    return f"{BASE_URL}/film/{film_id}/prehled/"
+
+
 def profile_url(user_id):
     return f"{BASE_URL}/uzivatel/{user_id}/prehled/"
 

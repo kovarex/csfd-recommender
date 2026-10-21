@@ -271,9 +271,33 @@ def save_genres(connection, film_genres):
         cursor.execute("CREATE TABLE film_genres_new LIKE film_genres")
         for start in range(0, len(rows), 10000):
             cursor.executemany("INSERT INTO film_genres_new (film_id, genre) VALUES (%s, %s)", rows[start:start + 10000])
+        cursor.execute("INSERT IGNORE INTO film_genres_new (film_id, genre) SELECT film_id, genre FROM csfd_genres")
         cursor.execute("RENAME TABLE film_genres TO film_genres_old, film_genres_new TO film_genres")
         cursor.execute("DROP TABLE film_genres_old")
     set_state(connection, "genres_at", int(time.time()))
+
+
+@reconnecting
+def films_without_genres(connection, min_ratings, limit):
+    """Films with at least min_ratings ratings whose ČSFD page wasn't read yet, the best rated first: those are the
+    ones the recommendations show at the top."""
+    return [row[0] for row in run_statement(
+        connection, "SELECT s.film_id FROM film_stats s LEFT JOIN film_pages p ON p.film_id = s.film_id "
+                    "WHERE s.rating_count >= %s AND p.film_id IS NULL ORDER BY s.average DESC LIMIT %s",
+        (min_ratings, limit))]
+
+
+@reconnecting
+def save_film_genres(connection, film_id, genres):
+    """Stores the genres read from a film's ČSFD page (also into film_genres, which the web reads)."""
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM csfd_genres WHERE film_id=%s", (film_id,))
+        if genres:
+            cursor.executemany("INSERT INTO csfd_genres (film_id, genre) VALUES (%s, %s)", [(film_id, g) for g in genres])
+            cursor.executemany("INSERT IGNORE INTO film_genres (film_id, genre) VALUES (%s, %s)",
+                               [(film_id, g) for g in genres])
+        cursor.execute("INSERT INTO film_pages (film_id, fetched_at) VALUES (%s, NOW()) "
+                       "ON DUPLICATE KEY UPDATE fetched_at=NOW()", (film_id,))
 
 
 @reconnecting

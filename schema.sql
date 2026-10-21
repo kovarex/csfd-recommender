@@ -57,6 +57,20 @@ CREATE TABLE IF NOT EXISTS film_genres (
   KEY genre (genre, film_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Genres from the films' own ČSFD pages (Wikidata has none for many films), kept apart so the weekly Wikidata
+-- download, which replaces film_genres, can add them back. Genre names are ČSFD's URL slugs without dashes.
+CREATE TABLE IF NOT EXISTS csfd_genres (
+  film_id INT UNSIGNED NOT NULL,
+  genre VARCHAR(20) NOT NULL,
+  PRIMARY KEY (film_id, genre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Films whose ČSFD page was read for csfd_genres.
+CREATE TABLE IF NOT EXISTS film_pages (
+  film_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  fetched_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- The fan clubs of the priority users (priority-users.txt), scraped first too: users who added them to favourites.
 CREATE TABLE IF NOT EXISTS fans (
   user_id INT UNSIGNED NOT NULL,

@@ -14,8 +14,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import db, export, genres
-from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, profile_url, ratings_url
-from .parse import NotRatingsPage, parse_fanclub, parse_ratings_page
+from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, film_url, profile_url, ratings_url
+from .parse import NotRatingsPage, parse_fanclub, parse_film_genres, parse_ratings_page
 
 DEFAULT_CONFIG = os.path.expanduser("~/csfd-config.ini")
 log = logging.getLogger("csfd")
@@ -222,6 +222,11 @@ def main():
     series_stats = sub.add_parser("series-stats", help="rebuild how differently viewers rate each series' episodes")
     series_stats.add_argument("--max-age-hours", type=float, default=0,
                               help="only rebuild when the last rebuild is older than this")
+    film_genres = sub.add_parser("film-genres", help="read genres from the ČSFD pages of films that have none read yet")
+    film_genres.add_argument("--pages", type=int, default=300, help="film pages to read in this run")
+    film_genres.add_argument("--min-ratings", type=int, default=100)
+    film_genres.add_argument("--rate", type=float, help="requests per second (overrides the config)")
+    film_genres.add_argument("--workers", type=int, default=8)
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
     film_stats.add_argument("--max-age-hours", type=float, default=0,
                             help="only rebuild when the last rebuild is older than this")
@@ -268,6 +273,30 @@ def make_fetcher(config):
                            render=crawl.get("render", "auto"))
 
 
+def read_film_genres(connection, fetcher, film_ids, workers):
+    """Reads the films' ČSFD pages in parallel and stores their genres. Returns how many pages were stored."""
+    def fetch(film_id):
+        try:
+            return film_id, parse_film_genres(fetcher.get(film_url(film_id)))
+        except NotFound:
+            return film_id, []
+        except Blocked:
+            raise
+        except (FetchError, NotRatingsPage) as e:
+            log.warning("Genres of film %s not read: %s", film_id, e)
+            return film_id, None
+
+    stored = 0
+    with ThreadPoolExecutor(workers) as pool:
+        # A few pages at a time, so a block or the time limit doesn't leave hundreds of queued requests to finish.
+        for start in range(0, len(film_ids), 2 * workers):
+            for film_id, genres in pool.map(fetch, film_ids[start:start + 2 * workers]):
+                if genres is not None:
+                    db.save_film_genres(connection, film_id, genres)
+                    stored += 1
+    return stored
+
+
 def read_fans(connection, fetcher, user_ids):
     """Stores the fan club of each user; a profile that can't be read keeps the fans read the last time."""
     for user_id in user_ids:
@@ -305,6 +334,14 @@ def run_command(args, config):
             user_ids = list(dict.fromkeys(user_ids + db.get_fans(connection, user_ids)))
         db.prioritize_users(connection, user_ids, args.rescrape_hours)
         print(f"Prioritized {len(user_ids)} user(s).")
+    elif args.command == "film-genres":
+        if args.rate:
+            config["crawl"]["rate"] = str(args.rate)
+        connection = db.connect(config)
+        db.create_schema(connection)
+        film_ids = db.films_without_genres(connection, args.min_ratings, args.pages)
+        stored = read_film_genres(connection, make_fetcher(config), film_ids, args.workers)
+        print(f"Read the genres of {stored} of {len(film_ids)} film(s).")
     elif args.command == "film-stats":
         connection = db.connect(config)
         db.create_schema(connection)
