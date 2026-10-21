@@ -227,6 +227,7 @@ def main():
     film_genres.add_argument("--min-ratings", type=int, default=100)
     film_genres.add_argument("--rate", type=float, help="requests per second (overrides the config)")
     film_genres.add_argument("--workers", type=int, default=8)
+    film_genres.add_argument("--seconds", type=float, default=0, help="stop reading new pages after this long")
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
     film_stats.add_argument("--max-age-hours", type=float, default=0,
                             help="only rebuild when the last rebuild is older than this")
@@ -273,8 +274,10 @@ def make_fetcher(config):
                            render=crawl.get("render", "auto"))
 
 
-def read_film_genres(connection, fetcher, film_ids, workers):
-    """Reads the films' ČSFD pages in parallel and stores their genres. Returns how many pages were stored."""
+def read_film_genres(connection, fetcher, film_ids, workers, seconds=0):
+    """Reads the films' ČSFD pages in parallel and stores their genres, until `seconds` have passed (0 = no limit).
+    Returns how many pages were stored."""
+    deadline = time.monotonic() + seconds if seconds else None
     def fetch(film_id):
         try:
             return film_id, parse_film_genres(fetcher.get(film_url(film_id)))
@@ -290,10 +293,12 @@ def read_film_genres(connection, fetcher, film_ids, workers):
     with ThreadPoolExecutor(workers) as pool:
         # A few pages at a time, so a block or the time limit doesn't leave hundreds of queued requests to finish.
         for start in range(0, len(film_ids), 2 * workers):
-            for film_id, genres in pool.map(fetch, film_ids[start:start + 2 * workers]):
-                if genres is not None:
-                    db.save_film_genres(connection, film_id, genres)
-                    stored += 1
+            if deadline and time.monotonic() > deadline:
+                break
+            pages = [(film_id, genres) for film_id, genres in pool.map(fetch, film_ids[start:start + 2 * workers])
+                     if genres is not None]
+            db.save_film_genres(connection, pages)
+            stored += len(pages)
     return stored
 
 
@@ -340,7 +345,7 @@ def run_command(args, config):
         connection = db.connect(config)
         db.create_schema(connection)
         film_ids = db.films_without_genres(connection, args.min_ratings, args.pages)
-        stored = read_film_genres(connection, make_fetcher(config), film_ids, args.workers)
+        stored = read_film_genres(connection, make_fetcher(config), film_ids, args.workers, args.seconds)
         print(f"Read the genres of {stored} of {len(film_ids)} film(s).")
     elif args.command == "film-stats":
         connection = db.connect(config)
@@ -366,7 +371,10 @@ def run_command(args, config):
         db.create_schema(connection)
         last = int(db.get_state(connection, "genres_at", 0))
         outdated = db.get_state(connection, "genres_version") != str(genres.VERSION)
-        if outdated or time.time() - last >= args.max_age_hours * 3600:
+        # A download cut off by the time limit is tried again after an hour, not on every run.
+        tried = int(db.get_state(connection, "genres_attempt_at", 0))
+        if (outdated or time.time() - last >= args.max_age_hours * 3600) and time.time() - tried >= 3600:
+            db.set_state(connection, "genres_attempt_at", int(time.time()))
             started = time.time()
             film_genres = genres.download()
             db.save_genres(connection, film_genres)

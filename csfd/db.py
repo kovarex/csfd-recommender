@@ -267,10 +267,16 @@ def save_genres(connection, film_genres):
     """Replaces film_genres with {film ID: set of genres}, swapping the new table in atomically."""
     rows = [(film, genre) for film, genres in film_genres.items() for genre in genres]
     with connection.cursor() as cursor:
+        cursor.execute("SET SESSION lock_wait_timeout = 60")
         cursor.execute("DROP TABLE IF EXISTS film_genres_new")
         cursor.execute("CREATE TABLE film_genres_new LIKE film_genres")
+        # Like film_stats: inserting into the table with its secondary index was stopped by the time limit on NFS.
+        cursor.execute("ALTER TABLE film_genres_new DROP KEY genre")
+        connection.begin()
         for start in range(0, len(rows), 10000):
             cursor.executemany("INSERT INTO film_genres_new (film_id, genre) VALUES (%s, %s)", rows[start:start + 10000])
+        connection.commit()
+        cursor.execute("ALTER TABLE film_genres_new ADD KEY genre (genre, film_id)")
         # ČSFD's own genres win where its page was read; "antologie" stays, since ČSFD has no such genre.
         cursor.execute("DELETE n FROM film_genres_new n JOIN film_pages p ON p.film_id = n.film_id "
                        "WHERE n.genre <> 'antologie'")
@@ -291,18 +297,28 @@ def films_without_genres(connection, min_ratings, limit):
 
 
 @reconnecting
-def save_film_genres(connection, film_id, genres):
-    """Stores the genres read from a film's ČSFD page; in film_genres, which the web reads, they replace Wikidata's
-    (except "antologie", which ČSFD doesn't have)."""
-    with connection.cursor() as cursor:
-        cursor.execute("DELETE FROM csfd_genres WHERE film_id=%s", (film_id,))
-        cursor.execute("DELETE FROM film_genres WHERE film_id=%s AND genre <> 'antologie'", (film_id,))
-        if genres:
-            cursor.executemany("INSERT INTO csfd_genres (film_id, genre) VALUES (%s, %s)", [(film_id, g) for g in genres])
-            cursor.executemany("INSERT IGNORE INTO film_genres (film_id, genre) VALUES (%s, %s)",
-                               [(film_id, g) for g in genres])
-        cursor.execute("INSERT INTO film_pages (film_id, fetched_at) VALUES (%s, NOW()) "
-                       "ON DUPLICATE KEY UPDATE fetched_at=NOW()", (film_id,))
+def save_film_genres(connection, pages):
+    """Stores [(film ID, genres)] read from the films' ČSFD pages, in one transaction (single writes are slow on NFS).
+    In film_genres, which the web reads, they replace Wikidata's (except "antologie", which ČSFD doesn't have)."""
+    if not pages:
+        return
+    ids = [film_id for film_id, _ in pages]
+    rows = [(film_id, genre) for film_id, genres in pages for genre in genres]
+    marks = ",".join(["%s"] * len(ids))
+    connection.begin()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"DELETE FROM csfd_genres WHERE film_id IN ({marks})", ids)
+            cursor.execute(f"DELETE FROM film_genres WHERE film_id IN ({marks}) AND genre <> 'antologie'", ids)
+            if rows:
+                cursor.executemany("INSERT INTO csfd_genres (film_id, genre) VALUES (%s, %s)", rows)
+                cursor.executemany("INSERT IGNORE INTO film_genres (film_id, genre) VALUES (%s, %s)", rows)
+            cursor.executemany("INSERT INTO film_pages (film_id, fetched_at) VALUES (%s, NOW()) "
+                               "ON DUPLICATE KEY UPDATE fetched_at=NOW()", [(film_id,) for film_id in ids])
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
 
 
 @reconnecting
