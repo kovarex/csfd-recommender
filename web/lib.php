@@ -9,6 +9,8 @@ const GENRE_NAMES = ['scifi' => 'sci-fi', 'fantasy' => 'fantasy', 'horor' => 'ho
   'romanticky' => 'romantický', 'animovany' => 'animovaný', 'anime' => 'anime', 'dokumentarni' => 'dokumentární',
   'valecny' => 'válečný', 'western' => 'western', 'historicky' => 'historický', 'zivotopisny' => 'životopisný',
   'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní'];
+// Kinds the recommendations show unless another is chosen.
+const DEFAULT_RECOMMEND_KINDS = 'film,seriál';
 // Lists on the recommendations page: key => [tab label, explanation].
 const RECOMMEND_LISTS = [
   'best' => ['Nejlepší pro tebe', 'Filmy s nejvyšším odhadem hodnocení.'],

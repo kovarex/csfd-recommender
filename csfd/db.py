@@ -85,6 +85,7 @@ def create_schema(connection):
 EXTRA_INDEXES = [
     ("users", "rating_count", "ALTER TABLE users ADD KEY rating_count (rating_count)"),
     ("users", "name", "ALTER TABLE users ADD KEY name (name)"),
+    ("films", "parent_id", "ALTER TABLE films ADD KEY parent_id (parent_id)"),
     ("film_stats", "kind_count", ["ALTER TABLE film_stats ADD COLUMN kind VARCHAR(40) NOT NULL DEFAULT '', "
                                   "ADD KEY kind_count (kind, rating_count), ADD KEY kind_average (kind, average), "
                                   "ADD KEY average (average)",
