@@ -7,7 +7,9 @@ import argparse
 import configparser
 import logging
 import os
+import signal
 import threading
+import traceback
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -176,6 +178,17 @@ def load_config(path):
     return config
 
 
+class TimeLimit(Exception):
+    pass
+
+
+def stopped_by_time_limit(signum, frame):
+    # The deepest line of our own code, not the line in pymysql that was waiting for the database.
+    stack = traceback.extract_stack(frame)
+    place = next((f for f in reversed(stack) if os.path.dirname(f.filename) == os.path.dirname(__file__)), stack[-1])
+    raise TimeLimit(f"stopped by the time limit in {os.path.basename(place.filename)}:{place.lineno} {place.line}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=os.environ.get("CSFD_CONFIG", DEFAULT_CONFIG))
@@ -207,6 +220,9 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config(args.config)
     if args.command != "run":
+        # The time limit in run-crawl.sh stops a step with SIGTERM, which would end Python without the error report
+        # below; as an exception it is reported with the place it stopped at.
+        signal.signal(signal.SIGTERM, stopped_by_time_limit)
         # Cleared when the command ends; left behind when NFS kills it, so the overview can say it didn't finish.
         try:
             db.set_state(db.connect(config), f"running_{args.command}", int(time.time()))

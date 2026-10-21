@@ -4,6 +4,7 @@ import functools
 import json
 import logging
 import os
+import sys
 import time
 
 import pymysql
@@ -162,22 +163,30 @@ def refresh_film_stats(connection):
             sums[film_id] = sums.get(film_id, 0) + stars
         if number % 10 == 0:
             set_state(connection, "film_stats_progress", f"{number}/{len(starts)} ranges in {time.time() - started:.0f} s")
+    progress = lambda phase: set_state(connection, "film_stats_progress", f"{phase} ({time.time() - started:.0f} s)")
+    progress(f"read {len(starts)} ranges, reading kinds")
+    # Only the rated films' kinds are kept (and each kind string once): all films' kinds may not fit the task's memory.
     kinds = {}
     (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
     for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
-        kinds.update(run_statement(connection, "SELECT id, kind FROM films WHERE id BETWEEN %s AND %s",
-                                   (start, start + FILM_STATS_FILM_STEP - 1)))
+        for film_id, kind in run_statement(connection, "SELECT id, kind FROM films WHERE id BETWEEN %s AND %s",
+                                           (start, start + FILM_STATS_FILM_STEP - 1)):
+            if film_id in counts:
+                kinds[film_id] = sys.intern(kind or "")
     rows = [(film_id, count, round(sums[film_id] / count, 3), kinds.get(film_id, ""))
             for film_id, count in sorted(counts.items())]
 
     with connection.cursor() as cursor:
         # Fail instead of waiting for a lock until NFS kills the task.
         cursor.execute("SET SESSION lock_wait_timeout = 60")
+        progress("creating film_stats_new")
         cursor.execute("DROP TABLE IF EXISTS film_stats_new")
         cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
         for start in range(0, len(rows), 10000):
+            progress(f"writing rows {start:,}/{len(rows):,}")
             cursor.executemany("INSERT INTO film_stats_new (film_id, rating_count, average, kind) "
                                "VALUES (%s, %s, %s, %s)", rows[start:start + 10000])
+        progress("swapping tables")
         cursor.execute("RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
         cursor.execute("DROP TABLE film_stats_old")
 
