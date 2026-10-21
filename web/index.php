@@ -212,10 +212,15 @@ function recommend_page(int $id): void
   $list = isset(RECOMMEND_LISTS[$_GET['list'] ?? '']) ? $_GET['list'] : 'best';
   $genre = isset(GENRE_NAMES[$_GET['genre'] ?? '']) ? $_GET['genre'] : '';
   $min = max(1, (int)($_GET['min'] ?? 100));
+  // Only films by default: concerts, nature series and the like are rated mostly by their fans, so they get high
+  // averages that say little about how anyone else would like them, and they crowded the top of the list.
+  $kind = $_GET['kind'] ?? 'film';
+  if ($kind !== '' && !in_array($kind, film_kinds(), true))
+    $kind = 'film';
   $tabs = [];
   foreach (RECOMMEND_LISTS as $key => [$label])
     $tabs[] = $key === $list ? '<b>' . h($label) . '</b>'
-                             : '<a href="' . h(url(['view' => 'recommend', 'id' => $id, 'list' => $key, 'genre' => $genre, 'min' => $_GET['min'] ?? null])) . '">' . h($label) . '</a>';
+                             : '<a href="' . h(url(['view' => 'recommend', 'id' => $id, 'list' => $key, 'genre' => $genre, 'kind' => $_GET['kind'] ?? null, 'min' => $_GET['min'] ?? null])) . '">' . h($label) . '</a>';
   echo '<p><a href="' . h(url(['view' => 'user', 'id' => $id])) . '">← hodnocení uživatele</a></p>';
   echo '<p class="filters">' . implode(' · ', $tabs) . '</p>';
   echo '<p class="note">' . h(RECOMMEND_LISTS[$list][1]) . '</p>';
@@ -239,6 +244,10 @@ function recommend_page(int $id): void
     <form class="filters">
       <input type="hidden" name="view" value="recommend"><input type="hidden" name="id" value="<?= $id ?>">
       <input type="hidden" name="list" value="<?= h($list) ?>">
+      typ <select name="kind"><option value="">vše</option>
+        <?php foreach (film_kinds() as $k): ?>
+          <option <?= $k === $kind ? 'selected' : '' ?>><?= h($k) ?></option>
+        <?php endforeach ?></select>
       žánr <select name="genre"><option value="">vše</option>
         <?php foreach (GENRE_NAMES as $key => $genreName): ?>
           <option value="<?= h($key) ?>" <?= $key === $genre ? 'selected' : '' ?>><?= h($genreName) ?></option>
@@ -247,25 +256,26 @@ function recommend_page(int $id): void
       <button>Zobrazit</button>
     </form>
     <?php
-    recommended_films($model, $taste, $list, $ratings, $genre, $min);
+    recommended_films($model, $taste, $list, $ratings, $genre, $kind, $min);
   }
   echo '<p class="note">Model natrénován ' . h(local_time($model['trained_at'])) . ' na ' . n($model['ratings']) .
        ' hodnoceních (průměrná chyba odhadu ' . number_format($model['validation_rmse'], 2, ',', '') . ' hvězdičky). ' .
        'Vkus spočítán z ' . n($taste['films']) . ' hodnocení za ' . number_format(microtime(true) - $started, 1, ',', '') . ' s.</p>';
 }
 
-function recommended_films(array $model, array $taste, string $list, array $ratings, string $genre, int $min): void
+function recommended_films(array $model, array $taste, string $list, array $ratings, string $genre, string $kind,
+                           int $min): void
 {
-  $inGenre = null;
-  if ($genre !== '')
-    $inGenre = array_flip(array_map('intval', array_column(query('SELECT film_id FROM film_genres WHERE genre=?', [$genre]), 'film_id')));
+  $idSet = fn(string $sql, string $value): array => array_flip(array_map('intval', array_column(query($sql, [$value]), 'film_id')));
+  $inGenre = $genre !== '' ? $idSet('SELECT film_id FROM film_genres WHERE genre=?', $genre) : null;
+  $ofKind = $kind !== '' ? $idSet('SELECT film_id FROM film_stats WHERE kind=?', $kind) : null;
   $scores = score_films($model, $taste);
   $ranked = [];
   foreach ($scores as $i => [$predicted, $cosine])
   {
     $filmId = $model['film_ids'][$i];
     if (!$model['film_flags'][$i] || $model['film_counts'][$i] < $min || isset($ratings[$filmId])
-        || ($inGenre !== null && !isset($inGenre[$filmId])))
+        || ($inGenre !== null && !isset($inGenre[$filmId])) || ($ofKind !== null && !isset($ofKind[$filmId])))
       continue;
     $difference = clip_stars($predicted) - clip_stars($model['film_average'][$i]);
     $ranked[$i] = ['best' => $predicted, 'above' => $difference, 'below' => -$difference, 'match' => $cosine,
