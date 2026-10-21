@@ -248,6 +248,12 @@ def get_state(connection, name, default=None):
 
 
 @reconnecting
+def clear_state(connection, name):
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM crawl_state WHERE name=%s", (name,))
+
+
+@reconnecting
 def set_state(connection, name, value):
     with connection.cursor() as cursor:
         cursor.execute(

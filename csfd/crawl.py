@@ -206,7 +206,24 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config(args.config)
+    try:
+        run_command(args, config)
+    except Exception as e:
+        # The log is only on NFS, so the error goes to the database too, where the overview page shows it.
+        log.exception("%s failed", args.command)
+        try:
+            db.set_state(db.connect(config), f"error_{args.command}", f"{time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}: {e}"[:255])
+        except Exception:
+            log.exception("Could not save the error")
+        raise
+    else:
+        try:
+            db.clear_state(db.connect(config), f"error_{args.command}")
+        except Exception:
+            log.exception("Could not clear the error")
 
+
+def run_command(args, config):
     if args.command == "run":
         if args.rate:
             config["crawl"]["rate"] = str(args.rate)
