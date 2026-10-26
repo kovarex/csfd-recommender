@@ -367,11 +367,22 @@ class CrawlTest(unittest.TestCase):
                          ((1, 2, Decimal("3.000"), "film"), (2, 1, Decimal("3.000"), "série")))
         self.assertEqual(self.query("SELECT value FROM crawl_state WHERE name='film_kinds'"), (('["film", "série"]',),))
 
+    def test_film_stats_get_titles_searchable_also_when_the_table_had_none(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE film_stats DROP KEY title, DROP COLUMN title")  # As before 26 Oct 2026.
+            cursor.execute("INSERT INTO films (id, slug, title, kind) VALUES (1, 'a', 'Válka ve Vietnamu', 'seriál'), "
+                           "(2, 'b', 'Kmotr', 'film')")
+            cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (5, 1, 5), (5, 2, 4)")
+        db.refresh_film_stats(self.connection)
+        self.assertEqual(self.query("SELECT film_id FROM film_stats WHERE MATCH(title) AGAINST('+valka* +viet*' "
+                                    "IN BOOLEAN MODE)"), ((1,),))
+
     def test_migration_adds_the_kind_to_old_film_stats(self):
         db.create_schema(self.connection)
         with self.connection.cursor() as cursor:
             cursor.execute("ALTER TABLE film_stats DROP KEY kind_count, DROP KEY kind_average, DROP KEY average, "
-                           "DROP COLUMN kind")
+                           "DROP KEY title, DROP COLUMN kind, DROP COLUMN title")
             cursor.execute("INSERT INTO films (id, slug, title, kind) VALUES (1, 'a', 'A', 'film')")
             cursor.execute("INSERT INTO film_stats (film_id, rating_count, average) VALUES (1, 3, 4.0)")
         db.create_schema(self.connection)

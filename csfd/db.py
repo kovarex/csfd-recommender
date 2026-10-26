@@ -172,16 +172,18 @@ def refresh_film_stats(connection):
         if number % 10 == 0:
             set_state(connection, "film_stats_progress", f"{number}/{len(starts)} ranges in {time.time() - started:.0f} s")
     progress = lambda phase: set_state(connection, "film_stats_progress", f"{phase} ({time.time() - started:.0f} s)")
-    progress(f"read {len(starts)} ranges, reading kinds")
-    # Only the rated films' kinds are kept (and each kind string once): all films' kinds may not fit the task's memory.
-    kinds = {}
+    progress(f"read {len(starts)} ranges, reading kinds and titles")
+    # Only the rated films' kinds and titles are kept (each kind string once): all films' may not fit the task's memory.
+    kinds, titles = {}, {}
     (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
     for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
-        for film_id, kind in run_statement(connection, "SELECT id, kind FROM films WHERE id BETWEEN %s AND %s",
-                                           (start, start + FILM_STATS_FILM_STEP - 1)):
+        for film_id, kind, title in run_statement(
+                connection, "SELECT id, kind, title FROM films WHERE id BETWEEN %s AND %s",
+                (start, start + FILM_STATS_FILM_STEP - 1)):
             if film_id in counts:
                 kinds[film_id] = sys.intern(kind or "")
-    rows = [(film_id, count, round(sums[film_id] / count, 3), kinds.get(film_id, ""))
+                titles[film_id] = title
+    rows = [(film_id, count, round(sums[film_id] / count, 3), kinds.get(film_id, ""), titles.get(film_id, ""))
             for film_id, count in sorted(counts.items())]
 
     with connection.cursor() as cursor:
@@ -192,23 +194,35 @@ def refresh_film_stats(connection):
         cursor.execute("CREATE TABLE film_stats_new LIKE film_stats")
         # Writing 150 k rows into the table with its four secondary indexes was stopped by the 5 minute limit on
         # NFS. The rows go in by primary key in one transaction and the indexes are built afterwards, in one pass.
-        cursor.execute("ALTER TABLE film_stats_new " + ", ".join(f"DROP KEY {key}" for key in FILM_STATS_KEYS))
+        cursor.execute("SELECT DISTINCT index_name FROM information_schema.statistics WHERE table_schema=DATABASE() "
+                       "AND table_name='film_stats_new' AND index_name <> 'PRIMARY'")
+        keys = [row[0] for row in cursor.fetchall()]
+        cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE() "
+                       "AND table_name='film_stats_new' AND column_name='title'")
+        changes = [f"DROP KEY {key}" for key in keys]
+        if not cursor.fetchone():  # Added 26 Oct 2026; the swap below brings it to an existing database.
+            changes.append("ADD COLUMN title VARCHAR(300) NOT NULL DEFAULT ''")
+        if changes:
+            cursor.execute("ALTER TABLE film_stats_new " + ", ".join(changes))
         connection.begin()
         for start in range(0, len(rows), 10000):
             progress(f"writing rows {start:,}/{len(rows):,}")
-            cursor.executemany("INSERT INTO film_stats_new (film_id, rating_count, average, kind) "
-                               "VALUES (%s, %s, %s, %s)", rows[start:start + 10000])
+            cursor.executemany("INSERT INTO film_stats_new (film_id, rating_count, average, kind, title) "
+                               "VALUES (%s, %s, %s, %s, %s)", rows[start:start + 10000])
         connection.commit()
         progress("building indexes")
         cursor.execute("ALTER TABLE film_stats_new " + ", ".join(f"ADD KEY {key} ({columns})"
                                                                 for key, columns in FILM_STATS_KEYS.items()))
+        # The web's title search: LIKE over the films table took over a minute on NFS.
+        progress("building the search index")
+        cursor.execute("ALTER TABLE film_stats_new ADD FULLTEXT KEY title (title)")
         progress("swapping tables")
         cursor.execute("RENAME TABLE film_stats TO film_stats_old, film_stats_new TO film_stats")
         cursor.execute("DROP TABLE film_stats_old")
 
     # The kinds for the film list's filter, so the page doesn't count them on every load.
     per_kind = {}
-    for _, _, _, kind in rows:
+    for _, _, _, kind, _ in rows:
         per_kind[kind] = per_kind.get(kind, 0) + 1
     top = sorted(per_kind, key=lambda kind: (-per_kind[kind], kind))[:15]
     while len(json.dumps(top, ensure_ascii=False)) > 255:  # crawl_state.value is VARCHAR(255)

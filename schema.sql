@@ -103,8 +103,11 @@ CREATE TABLE IF NOT EXISTS film_stats (
   average DECIMAL(4,3) NOT NULL,
   -- Copied from films, so the film list can filter and sort by an index without joining films.
   kind VARCHAR(40) NOT NULL DEFAULT '',
+  -- Copied from films for the title search (FULLTEXT), which was too slow over films.
+  title VARCHAR(300) NOT NULL DEFAULT '',
   KEY rating_count (rating_count),
   KEY average (average),
   KEY kind_count (kind, rating_count),
-  KEY kind_average (kind, average)
+  KEY kind_average (kind, average),
+  FULLTEXT KEY title (title)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

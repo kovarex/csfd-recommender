@@ -499,6 +499,26 @@ function film_page(int $id, int $offset): void
   echo pager($total);
 }
 
+/**
+ * [condition, parameters] of the title search over film_stats (rated films) joined with films. Its full-text index
+ * finds the films whose words start with the searched ones, then LIKE keeps those containing the text as typed:
+ * LIKE over films.title alone took over a minute on NFS. Words under 3 letters aren't in the index
+ * (innodb_ft_min_token_size), so a search made only of those uses LIKE alone.
+ */
+function title_search(string $q, string $like): array
+{
+  // film_stats gets its titles and the index at its next rebuild after the 26 Oct 2026 update.
+  $indexed = (bool)value("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE()
+                          AND table_name='film_stats' AND index_name='title'");
+  if (!$indexed)
+    return ['f.title LIKE ?', [$like]];
+  preg_match_all('/[\p{L}\p{N}]{3,}/u', $q, $words);
+  if (!$words[0])
+    return ['s.title LIKE ?', [$like]];
+  return ['MATCH(s.title) AGAINST(? IN BOOLEAN MODE) AND s.title LIKE ?',
+          [implode(' ', array_map(fn($w) => "+$w*", $words[0])), $like]];
+}
+
 function search_page(string $q): void
 {
   header_html('Hledání: ' . $q);
@@ -508,9 +528,10 @@ function search_page(string $q): void
     return;
   }
   $like = '%' . addcslashes($q, '%_\\') . '%';
-  $films = query('SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average FROM films f
-                  LEFT JOIN film_stats s ON s.film_id=f.id WHERE f.title LIKE ?
-                  ORDER BY s.rating_count DESC LIMIT 50', [$like]);
+  [$condition, $params] = title_search($q, $like);
+  $films = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average
+                  FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $condition
+                  ORDER BY s.rating_count DESC LIMIT 50", $params);
   $users = query('SELECT id AS user_id, name, rating_count FROM users WHERE name LIKE ? ORDER BY rating_count DESC LIMIT 50', [$like]);
   ?>
   <h2>Filmy</h2>
