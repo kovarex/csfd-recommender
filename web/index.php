@@ -85,9 +85,10 @@ function users_page(int $offset): void
   if ($q !== '')
   {
     // A number finds that user ID, anything else searches names.
-    $where .= ctype_digit($q) ? ' AND (id=? OR name LIKE ?)' : ' AND name LIKE ?';
     $like = '%' . addcslashes($q, '%_\\') . '%';
-    $params = ctype_digit($q) ? [$q, $like] : [$like];
+    $ids = implode(',', matching_user_ids($like) ?: [0]);
+    $where .= ctype_digit($q) ? " AND (id=? OR id IN ($ids))" : " AND id IN ($ids)";
+    $params = ctype_digit($q) ? [$q] : [];
   }
   ?>
   <form class="filters">
@@ -194,8 +195,11 @@ function films_page(int $offset): void
   echo pager($total);
   // Ties are broken by the ID, which is part of every index, so the order is read from an index without sorting.
   $order = $sort === 'average' ? 's.average DESC, s.film_id DESC' : 's.rating_count DESC, s.film_id DESC';
+  // By average with a minimum count, MariaDB walked the average index past every rarely rated film (12 s on NFS);
+  // the few films above the minimum are found by the count index and sorted instead.
+  $index = $sort === 'average' && $min >= 20 ? 'FORCE INDEX (' . ($kind !== '' ? 'kind_count' : 'rating_count') . ')' : '';
   $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
-                 FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $where
+                 FROM film_stats s $index JOIN films f ON f.id=s.film_id WHERE $where
                  ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
   ?>
   <table>
@@ -522,6 +526,15 @@ function title_search(string $q, string $like): array
           [implode(' ', array_map(fn($w) => "+$w*", $words[0])), $like]];
 }
 
+/**
+ * IDs of users whose name contains the text (LIKE pattern), up to 2000. Read from the name index alone: with
+ * ORDER BY rating_count, MariaDB walked the rating_count index reading whole rows, which took a minute on NFS.
+ */
+function matching_user_ids(string $like): array
+{
+  return array_map('intval', array_column(query('SELECT id FROM users FORCE INDEX (name) WHERE name LIKE ? LIMIT 2000', [$like]), 'id'));
+}
+
 function search_page(string $q): void
 {
   header_html('Hledání: ' . $q);
@@ -537,7 +550,9 @@ function search_page(string $q): void
                   FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $condition
                   ORDER BY s.rating_count DESC LIMIT 50", $params);
   $filmsDone = microtime(true);
-  $users = query('SELECT id AS user_id, name, rating_count FROM users WHERE name LIKE ? ORDER BY rating_count DESC LIMIT 50', [$like]);
+  $ids = matching_user_ids($like);
+  $users = $ids ? query('SELECT id AS user_id, name, rating_count FROM users WHERE id IN (' . implode(',', $ids) . ')
+                         ORDER BY rating_count DESC LIMIT 50') : [];
   printf("<!-- films %.2f s (%s), users %.2f s -->\n", $filmsDone - $started, h($condition), microtime(true) - $filmsDone);
   ?>
   <h2>Filmy</h2>
