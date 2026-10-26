@@ -200,9 +200,12 @@ function films_page(int $offset): void
   // By average with a minimum count, MariaDB walked the average index past every rarely rated film (12 s on NFS);
   // the few films above the minimum are found by the count index and sorted instead.
   $index = $sort === 'average' && $min >= 20 ? 'FORCE INDEX (' . ($kind !== '' ? 'kind_count' : 'rating_count') . ')' : '';
-  $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
-                 FROM film_stats s $index JOIN films f ON f.id=s.film_id WHERE $where
-                 ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
+  // The page's IDs are picked from the index alone; only those rows are then read, because reading the row and the
+  // film of every film above the minimum before sorting took 10 s on NFS.
+  $rows = query("SELECT STRAIGHT_JOIN f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
+                 FROM (SELECT s.film_id FROM film_stats s $index WHERE $where
+                       ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset . ") page
+                 JOIN film_stats s ON s.film_id=page.film_id JOIN films f ON f.id=s.film_id ORDER BY $order", $params);
   printf("<!-- count %.2f s, rows %.2f s -->\n", $counted - $started, microtime(true) - $counted);
   ?>
   <table>
