@@ -511,8 +511,8 @@ function film_page(int $id, int $offset): void
 function title_search(string $q, string $like): array
 {
   // film_stats gets its titles and the index at its next rebuild after the 26 Oct 2026 update.
-  $indexed = (bool)value("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE()
-                          AND table_name='film_stats' AND index_name='title'");
+  // SHOW INDEX, not information_schema: that is slow on the shared NFS database server.
+  $indexed = (bool)query("SHOW INDEX FROM film_stats WHERE Key_name='title'");
   if (!$indexed)
     return ['f.title LIKE ?', [$like]];
   preg_match_all('/[\p{L}\p{N}]{3,}/u', $q, $words);
@@ -531,11 +531,14 @@ function search_page(string $q): void
     return;
   }
   $like = '%' . addcslashes($q, '%_\\') . '%';
+  $started = microtime(true);
   [$condition, $params] = title_search($q, $like);
   $films = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
                   FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $condition
                   ORDER BY s.rating_count DESC LIMIT 50", $params);
+  $filmsDone = microtime(true);
   $users = query('SELECT id AS user_id, name, rating_count FROM users WHERE name LIKE ? ORDER BY rating_count DESC LIMIT 50', [$like]);
+  printf("<!-- films %.2f s (%s), users %.2f s -->\n", $filmsDone - $started, h($condition), microtime(true) - $filmsDone);
   ?>
   <h2>Filmy</h2>
   <table>
