@@ -4,6 +4,7 @@ import functools
 import json
 import logging
 import os
+import pickle
 import sys
 import time
 
@@ -151,28 +152,96 @@ def kill_leftover_film_stats_queries(connection):
             log.warning("Could not kill it: %s", e)
 
 
-def refresh_film_stats(connection):
-    """Rebuilds film_stats from ratings and swaps it in atomically. Sums are read in short queries and added up here,
-    so the database only writes the final rows."""
-    set_state(connection, "film_stats_started_at", int(time.time()))
-    kill_leftover_film_stats_queries(connection)
-    counts, sums = {}, {}
-    started = time.time()
+# Where a rebuild that reads every rating keeps what it has read so far, so a rebuild that doesn't fit one scheduled
+# task continues in the next one. A rebuild older than this starts over: too many ratings changed meanwhile.
+DEFAULT_STATE_DIR = os.path.expanduser("~/csfd-state")
+SCAN_MAX_AGE = 24 * 3600
+# The writing of film_stats starts only with this much of the time budget left (at 60 M ratings the reading alone
+# took longer than the 7 minute limit; writing 400 k rows with the indexes takes 1-2 minutes on NFS).
+FILM_STATS_WRITE_SECONDS = 150
+
+
+def scan_path(state_dir, name):
+    return os.path.join(state_dir or DEFAULT_STATE_DIR, f"{name}.pickle")
+
+
+def load_scan(path):
+    """The saved state of an unfinished rebuild, or None (none, unreadable or too old)."""
+    try:
+        with open(path, "rb") as f:
+            scan = pickle.load(f)
+    except (OSError, pickle.UnpicklingError, EOFError):
+        return None
+    return scan if time.time() - scan.get("started_at", 0) < SCAN_MAX_AGE else None
+
+
+def save_scan(path, scan):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        pickle.dump(scan, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(path + ".tmp", path)
+
+
+def drop_scan(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def new_scan(connection, **data):
     (low, high), = run_statement(connection, "SELECT MIN(user_id), MAX(user_id) FROM ratings")
-    starts = range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP)
-    for number, start in enumerate(starts, 1):
-        # Plain reads of a primary key range: with a GROUP BY per range (probably a temporary table each time) the
-        # rebuild was killed after 4 minutes on 16 M ratings on NFS, while series-stats reading every rating
-        # finished within its 3 minutes.
-        for film_id, stars in run_statement(
-                connection, "SELECT film_id, stars FROM ratings WHERE user_id BETWEEN %s AND %s",
-                (start, start + FILM_STATS_USER_STEP - 1)):
+    return {"started_at": time.time(), "next": low or 0, "high": high if high is not None else -1, **data}
+
+
+def scan_ratings(connection, scan, path, columns, consume, deadline, progress):
+    """Reads ratings user range by user range from scan["next"] up to scan["high"], handing each range's rows to
+    consume, until the deadline (None = none). Every range read is saved (a few at a time), so a run stopped by the
+    time limit loses only the last few. Returns True when everything was read."""
+    # Plain reads of a primary key range: with a GROUP BY per range (probably a temporary table each time) the
+    # rebuild was killed after 4 minutes on 16 M ratings on NFS, while reading every rating was fast.
+    number = 0
+    while scan["next"] <= scan["high"]:
+        if deadline is not None and time.time() > deadline:
+            save_scan(path, scan)
+            return False
+        start = scan["next"]
+        consume(run_statement(connection, f"SELECT {columns} FROM ratings WHERE user_id BETWEEN %s AND %s",
+                              (start, start + FILM_STATS_USER_STEP - 1)))
+        scan["next"] = start + FILM_STATS_USER_STEP
+        number += 1
+        if number % 10 == 0:
+            save_scan(path, scan)
+            progress(f"read users up to {min(scan['next'], scan['high']):,} of {scan['high']:,}")
+    save_scan(path, scan)
+    return True
+
+
+def refresh_film_stats(connection, state_dir=None, seconds=0):
+    """Rebuilds film_stats from ratings and swaps it in atomically. Sums are read in short queries and added up here,
+    so the database only writes the final rows. With seconds, stops reading when they're up and continues in the
+    next call; returns True once film_stats was replaced."""
+    started = time.time()
+    deadline = started + seconds if seconds else None
+    progress = lambda phase: set_state(connection, "film_stats_progress", f"{phase} ({time.time() - started:.0f} s)")
+    kill_leftover_film_stats_queries(connection)
+    path = scan_path(state_dir, "film-stats")
+    scan = load_scan(path)
+    if scan is None:
+        set_state(connection, "film_stats_started_at", int(time.time()))
+        scan = new_scan(connection, counts={}, sums={})
+    counts, sums = scan["counts"], scan["sums"]
+
+    def consume(rows):
+        for film_id, stars in rows:
             counts[film_id] = counts.get(film_id, 0) + 1
             sums[film_id] = sums.get(film_id, 0) + stars
-        if number % 10 == 0:
-            set_state(connection, "film_stats_progress", f"{number}/{len(starts)} ranges in {time.time() - started:.0f} s")
-    progress = lambda phase: set_state(connection, "film_stats_progress", f"{phase} ({time.time() - started:.0f} s)")
-    progress(f"read {len(starts)} ranges, reading kinds and titles")
+
+    if (not scan_ratings(connection, scan, path, "film_id, stars", consume, deadline, progress)
+            or deadline is not None and deadline - time.time() < FILM_STATS_WRITE_SECONDS):
+        progress(f"read users up to {min(scan['next'], scan['high']):,} of {scan['high']:,}, continuing in the next run")
+        return False
+    progress("read all ratings, reading kinds and titles")
     # Only the rated films' kinds and titles are kept (each kind string once): all films' may not fit the task's memory.
     kinds, titles = {}, {}
     (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
@@ -229,27 +298,36 @@ def refresh_film_stats(connection):
         top.pop()
     set_state(connection, "film_kinds", json.dumps(top, ensure_ascii=False))
     set_state(connection, "film_stats_at", int(time.time()))
-    set_state(connection, "film_stats_progress", f"done in {time.time() - started:.0f} s")
+    set_state(connection, "film_stats_progress", f"done, the last part in {time.time() - started:.0f} s")
+    drop_scan(path)
+    return True
 
 
-def refresh_series_stats(connection):
+def refresh_series_stats(connection, state_dir=None, seconds=0):
     """Rebuilds series_stats from the episode ratings. Ratings are read in short queries per range of users and the
-    episodes picked out here: joining films in the query made MariaDB scan all episode ratings for every range."""
-    episode_series, season_series = {}, {}
-    (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
-    for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
-        for film_id, parent_id, kind in run_statement(
-                connection, "SELECT id, parent_id, kind FROM films WHERE kind IN ('série', 'epizoda') "
-                            "AND parent_id IS NOT NULL AND id BETWEEN %s AND %s", (start, start + FILM_STATS_FILM_STEP - 1)):
-            (season_series if kind == "série" else episode_series)[film_id] = parent_id
-    episode_series = {episode: season_series.get(parent, parent) for episode, parent in episode_series.items()}
-    spread_sums, users, episodes = {}, {}, {}
-    (low, high), = run_statement(connection, "SELECT MIN(user_id), MAX(user_id) FROM ratings")
-    for start in range(low or 0, (high or -1) + 1, FILM_STATS_USER_STEP):
-        per_user = {}  # (user, series) -> [count, sum, sum of squares]
-        for user_id, film_id, stars in run_statement(
-                connection, "SELECT user_id, film_id, stars FROM ratings WHERE user_id BETWEEN %s AND %s",
-                (start, start + FILM_STATS_USER_STEP - 1)):
+    episodes picked out here: joining films in the query made MariaDB scan all episode ratings for every range.
+    With seconds, continues in the next call like refresh_film_stats; returns True once series_stats was replaced."""
+    started = time.time()
+    deadline = started + seconds if seconds else None
+    path = scan_path(state_dir, "series-stats")
+    scan = load_scan(path)
+    if scan is None:
+        episode_series, season_series = {}, {}
+        (low, high), = run_statement(connection, "SELECT MIN(id), MAX(id) FROM films")
+        for start in range(low or 0, (high or -1) + 1, FILM_STATS_FILM_STEP):
+            for film_id, parent_id, kind in run_statement(
+                    connection, "SELECT id, parent_id, kind FROM films WHERE kind IN ('série', 'epizoda') "
+                                "AND parent_id IS NOT NULL AND id BETWEEN %s AND %s",
+                    (start, start + FILM_STATS_FILM_STEP - 1)):
+                (season_series if kind == "série" else episode_series)[film_id] = parent_id
+        episode_series = {episode: season_series.get(parent, parent) for episode, parent in episode_series.items()}
+        scan = new_scan(connection, episode_series=episode_series, spread_sums={}, users={}, episodes={})
+    episode_series, spread_sums, users, episodes = (scan["episode_series"], scan["spread_sums"], scan["users"],
+                                                    scan["episodes"])
+
+    def consume(rows):
+        per_user = {}  # (user, series) -> [count, sum, sum of squares]; a range holds all of its users' ratings.
+        for user_id, film_id, stars in rows:
             series = episode_series.get(film_id)
             if series is None:
                 continue
@@ -262,6 +340,11 @@ def refresh_series_stats(connection):
             if count >= 3:
                 spread_sums[series] = spread_sums.get(series, 0.0) + max(0.0, squares / count - (total / count) ** 2) ** 0.5
                 users[series] = users.get(series, 0) + 1
+
+    progress = lambda phase: set_state(connection, "series_stats_progress", f"{phase} ({time.time() - started:.0f} s)")
+    if not scan_ratings(connection, scan, path, "user_id, film_id, stars", consume, deadline, progress):
+        progress(f"read users up to {min(scan['next'], scan['high']):,} of {scan['high']:,}, continuing in the next run")
+        return False
     rows = [(series, users[series], len(episodes[series]), round(spread_sums[series] / users[series], 3))
             for series in sorted(users)]
     with connection.cursor() as cursor:
@@ -274,6 +357,9 @@ def refresh_series_stats(connection):
         cursor.execute("RENAME TABLE series_stats TO series_stats_old, series_stats_new TO series_stats")
         cursor.execute("DROP TABLE series_stats_old")
     set_state(connection, "series_stats_at", int(time.time()))
+    set_state(connection, "series_stats_progress", "done")
+    drop_scan(path)
+    return True
 
 
 @reconnecting

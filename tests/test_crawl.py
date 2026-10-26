@@ -1,5 +1,6 @@
 import configparser
 import os
+import tempfile
 import unittest
 import unittest.mock
 from datetime import date
@@ -208,6 +209,11 @@ class FetchTest(unittest.TestCase):
 
 class CrawlTest(unittest.TestCase):
     def setUp(self):
+        state_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(state_dir.cleanup)
+        patcher = unittest.mock.patch.object(db, "DEFAULT_STATE_DIR", state_dir.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.config = test_config()
         self.connection = db.connect(self.config)
         with self.connection.cursor() as cursor:
@@ -377,6 +383,36 @@ class CrawlTest(unittest.TestCase):
         db.refresh_film_stats(self.connection)
         self.assertEqual(self.query("SELECT film_id FROM film_stats WHERE MATCH(title) AGAINST('+valka* +viet*' "
                                     "IN BOOLEAN MODE)"), ((1,),))
+
+    def test_film_stats_continue_in_the_next_run_when_out_of_time(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("INSERT INTO films (id, slug, title, kind) VALUES (1, 'a', 'A', 'film'), (2, 'b', 'B', 'film')")
+            cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (1, 1, 4), (2, 1, 2), (3, 2, 5)")
+        clock = [1000.0]
+        with unittest.mock.patch.object(db, "FILM_STATS_USER_STEP", 1), \
+                unittest.mock.patch("time.time", lambda: clock[0]):
+            reads = []
+            real_run = db.run_statement.__wrapped__
+
+            def run_statement(connection, sql, params=None):
+                if sql.startswith("SELECT film_id, stars FROM ratings"):
+                    reads.append(params[0])
+                    clock[0] += 40  # Each range takes 40 s.
+                return real_run(connection, sql, params)
+
+            with unittest.mock.patch.object(db, "run_statement", run_statement):
+                self.assertFalse(db.refresh_film_stats(self.connection, seconds=70))
+                self.assertEqual(reads, [1, 2])
+                # Ratings added meanwhile to a user read already don't count; the rest continues where it stopped.
+                with self.connection.cursor() as cursor:
+                    cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (1, 2, 1)")
+                with unittest.mock.patch.object(db, "FILM_STATS_WRITE_SECONDS", 0):
+                    self.assertTrue(db.refresh_film_stats(self.connection, seconds=100))
+                self.assertEqual(reads, [1, 2, 3])
+        self.assertEqual(self.query("SELECT film_id, rating_count, average FROM film_stats ORDER BY film_id"),
+                         ((1, 2, Decimal("3.000")), (2, 1, Decimal("5.000"))))
+        self.assertIsNone(db.load_scan(db.scan_path(None, "film-stats")))
 
     def test_migration_adds_the_kind_to_old_film_stats(self):
         db.create_schema(self.connection)

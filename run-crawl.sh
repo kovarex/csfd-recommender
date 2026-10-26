@@ -14,9 +14,9 @@ sh deploy-web.sh >> "$LOG" 2>&1
 # Each preparation step gets a time limit, so a slow one can't take the whole scheduled task from the scraping.
 limit() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
 limit 150 python3 -m csfd.crawl prioritize priority-users.txt --rescrape-hours 24 --fans-max-age-hours 24 >> "$LOG" 2>&1
-limit 420 python3 -m csfd.crawl film-stats --max-age-hours 4 --retry-hours 1 >> "$LOG" 2>&1
+limit 420 python3 -m csfd.crawl film-stats --max-age-hours 4 --retry-hours 1 --seconds 300 >> "$LOG" 2>&1
 limit 180 python3 -m csfd.crawl genres --max-age-hours 168 >> "$LOG" 2>&1
-limit 180 python3 -m csfd.crawl series-stats --max-age-hours 24 >> "$LOG" 2>&1
+limit 180 python3 -m csfd.crawl series-stats --max-age-hours 24 --seconds 100 >> "$LOG" 2>&1
 # Genres from ČSFD film pages (Wikidata lacks many, e.g. documentaries): for a minute a run, the best rated films first.
 limit 120 python3 -m csfd.crawl film-genres --pages 400 --seconds 60 --rate "${CSFD_RATE:-5}" --workers "${CSFD_WORKERS:-8}" >> "$LOG" 2>&1
 LEFT=$(( ${CSFD_MINUTES:-11} * 60 - $(date +%s) + START ))

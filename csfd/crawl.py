@@ -222,6 +222,8 @@ def main():
     series_stats = sub.add_parser("series-stats", help="rebuild how differently viewers rate each series' episodes")
     series_stats.add_argument("--max-age-hours", type=float, default=0,
                               help="only rebuild when the last rebuild is older than this")
+    series_stats.add_argument("--seconds", type=float, default=0,
+                              help="read for this long, then continue in the next run (0 = all at once)")
     film_genres = sub.add_parser("film-genres", help="read genres from the ČSFD pages of films that have none read yet")
     film_genres.add_argument("--pages", type=int, default=300, help="film pages to read in this run")
     film_genres.add_argument("--min-ratings", type=int, default=100)
@@ -231,6 +233,8 @@ def main():
     film_stats = sub.add_parser("film-stats", help="rebuild per-film rating counts and averages for the web pages")
     film_stats.add_argument("--max-age-hours", type=float, default=0,
                             help="only rebuild when the last rebuild is older than this")
+    film_stats.add_argument("--seconds", type=float, default=0,
+                            help="read for this long, then continue in the next run (0 = all at once)")
     film_stats.add_argument("--retry-hours", type=float, default=0,
                             help="after a rebuild that didn't finish, wait this long before trying again")
     args = parser.parse_args()
@@ -266,6 +270,11 @@ def main():
             db.clear_state(db.connect(config), f"running_{args.command}")
         except Exception:
             log.exception("Could not clear the start")
+
+
+def state_dir(config):
+    """Where unfinished stats rebuilds keep what they have read ([crawl] state_dir, by default ~/csfd-state)."""
+    return os.path.expanduser(config.get("crawl", "state_dir", fallback=db.DEFAULT_STATE_DIR))
 
 
 def make_fetcher(config):
@@ -352,20 +361,25 @@ def run_command(args, config):
         db.create_schema(connection)
         last = int(db.get_state(connection, "film_stats_at", 0))
         tried = int(db.get_state(connection, "film_stats_started_at", 0))
-        if time.time() - last >= args.max_age_hours * 3600 and time.time() - tried >= args.retry_hours * 3600:
+        # A rebuild in progress continues on every run; a new one waits for max-age (and retry-hours after a failure).
+        path = db.scan_path(state_dir(config), "film-stats")
+        if db.load_scan(path) or (time.time() - last >= args.max_age_hours * 3600
+                                  and time.time() - tried >= args.retry_hours * 3600):
             started = time.time()
-            db.refresh_film_stats(connection)
-            print(f"Film stats rebuilt in {time.time() - started:.0f} s.")
+            done = db.refresh_film_stats(connection, state_dir(config), args.seconds)
+            print(f"Film stats {'rebuilt' if done else 'read further, to be continued'} in {time.time() - started:.0f} s.")
     elif args.command == "series-stats":
         connection = db.connect(config)
         db.create_schema(connection)
-        # Counted from the last attempt, so a rebuild cut off by the time limit is tried once a day, not every run.
+        # Counted from the start of the last rebuild, which continues on every run until it is done.
         last = int(db.get_state(connection, "series_stats_attempt_at", 0))
-        if time.time() - last >= args.max_age_hours * 3600:
-            db.set_state(connection, "series_stats_attempt_at", int(time.time()))
+        path = db.scan_path(state_dir(config), "series-stats")
+        if db.load_scan(path) or time.time() - last >= args.max_age_hours * 3600:
+            if not db.load_scan(path):
+                db.set_state(connection, "series_stats_attempt_at", int(time.time()))
             started = time.time()
-            db.refresh_series_stats(connection)
-            print(f"Series stats rebuilt in {time.time() - started:.0f} s.")
+            done = db.refresh_series_stats(connection, state_dir(config), args.seconds)
+            print(f"Series stats {'rebuilt' if done else 'read further, to be continued'} in {time.time() - started:.0f} s.")
     elif args.command == "genres":
         connection = db.connect(config)
         db.create_schema(connection)
