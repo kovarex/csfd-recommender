@@ -189,7 +189,9 @@ function films_page(int $offset): void
     <button>Zobrazit</button>
   </form>
   <?php
+  $started = microtime(true);
   $total = (int)value("SELECT COUNT(*) FROM film_stats s WHERE $where", $params);
+  $counted = microtime(true);
   if (!value('SELECT 1 FROM film_stats LIMIT 1'))
     echo '<p class="note">Statistiky filmů se ještě nepřepočítaly, objeví se po dalším běhu scraperu.</p>';
   echo pager($total);
@@ -201,6 +203,7 @@ function films_page(int $offset): void
   $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
                  FROM film_stats s $index JOIN films f ON f.id=s.film_id WHERE $where
                  ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
+  printf("<!-- count %.2f s, rows %.2f s -->\n", $counted - $started, microtime(true) - $counted);
   ?>
   <table>
     <tr><th class="num">#</th><th>Film</th><th>Typ</th><?= RATING_HEADERS ?></tr>
