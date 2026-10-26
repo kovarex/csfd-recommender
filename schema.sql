@@ -68,7 +68,10 @@ CREATE TABLE IF NOT EXISTS csfd_genres (
 -- Films whose ČSFD page was read for csfd_genres.
 CREATE TABLE IF NOT EXISTS film_pages (
   film_id INT UNSIGNED NOT NULL PRIMARY KEY,
-  fetched_at DATETIME NOT NULL
+  fetched_at DATETIME NOT NULL,
+  -- ČSFD's own rating (percent) and number of ratings, NULL when ČSFD shows none.
+  csfd_percent TINYINT UNSIGNED NULL,
+  csfd_count INT UNSIGNED NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- The fan clubs of the priority users (priority-users.txt), scraped first too: users who added them to favourites.
@@ -105,6 +108,9 @@ CREATE TABLE IF NOT EXISTS film_stats (
   kind VARCHAR(40) NOT NULL DEFAULT '',
   -- Copied from films for the title search (FULLTEXT), which was too slow over films.
   title VARCHAR(300) NOT NULL DEFAULT '',
+  -- From film_pages, so the lists show ČSFD's rating next to ours without a join.
+  csfd_percent TINYINT UNSIGNED NULL,
+  csfd_count INT UNSIGNED NULL,
   KEY rating_count (rating_count),
   KEY average (average),
   KEY kind_count (kind, rating_count),

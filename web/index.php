@@ -133,15 +133,15 @@ function user_page(int $id, int $offset): void
 
   $total = (int)value('SELECT COUNT(*) FROM ratings WHERE user_id=?', [$id]);
   echo pager($total);
-  $rows = query('SELECT r.film_id, r.stars, r.rated_on, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count
+  $rows = query('SELECT r.film_id, r.stars, r.rated_on, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count, s.csfd_percent, s.csfd_count
                  FROM ratings r JOIN films f ON f.id=r.film_id LEFT JOIN film_stats s ON s.film_id=r.film_id
                  WHERE r.user_id=? ORDER BY r.rated_on DESC, r.film_id LIMIT ' . PAGE_SIZE . ' OFFSET ' . $offset, [$id]);
   ?>
   <table>
-    <tr><th>Film</th><th>Typ</th><th>Hodnocení</th><th class="num">Procenta všech</th><th>Datum</th></tr>
+    <tr><th>Film</th><th>Typ</th><th>Hodnocení</th><?= RATING_HEADERS ?><th>Datum</th></tr>
     <?php foreach ($rows as $r): ?>
       <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><td class="stars"><?= stars((int)$r['stars']) ?></td>
-        <td class="num"><?= average($r) ?></td><td><?= h($r['rated_on']) ?></td></tr>
+        <?= rating_cells($r) ?><td><?= h($r['rated_on']) ?></td></tr>
     <?php endforeach ?>
   </table>
   <?php
@@ -174,8 +174,8 @@ function films_page(int $offset): void
   ?>
   <form class="filters">
     <input type="hidden" name="view" value="films">
-    Řadit <select name="sort"><option value="count">podle počtu hodnocení</option>
-      <option value="average" <?= $sort === 'average' ? 'selected' : '' ?>>podle průměru</option></select>
+    Řadit <select name="sort"><option value="count">podle našeho počtu hodnocení</option>
+      <option value="average" <?= $sort === 'average' ? 'selected' : '' ?>>podle našeho průměru</option></select>
     typ <select name="kind"><option value="">vše</option>
       <?php foreach (film_kinds() as $k): ?>
         <option <?= $k === $kind ? 'selected' : '' ?>><?= h($k) ?></option>
@@ -194,15 +194,15 @@ function films_page(int $offset): void
   echo pager($total);
   // Ties are broken by the ID, which is part of every index, so the order is read from an index without sorting.
   $order = $sort === 'average' ? 's.average DESC, s.film_id DESC' : 's.rating_count DESC, s.film_id DESC';
-  $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average
+  $rows = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
                  FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $where
                  ORDER BY $order LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, $params);
   ?>
   <table>
-    <tr><th class="num">#</th><th>Film</th><th>Typ</th><th class="num">Hodnocení</th><th class="num">Procenta</th></tr>
+    <tr><th class="num">#</th><th>Film</th><th>Typ</th><?= RATING_HEADERS ?></tr>
     <?php foreach ($rows as $i => $r): ?>
       <tr><td class="num"><?= $offset + $i + 1 ?></td><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td>
-        <td class="num"><?= n($r['rating_count']) ?></td><td class="num"><?= average($r) ?></td></tr>
+        <?= rating_cells($r) ?></tr>
     <?php endforeach ?>
   </table>
   <?php
@@ -374,20 +374,20 @@ function prediction_table(array $model, array $scores, array $indexes, array $ra
 {
   $ids = array_map(fn($i) => $model['film_ids'][$i], $indexes);
   $films = [];
-  foreach (query('SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count
+  foreach (query('SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count, s.csfd_percent, s.csfd_count
                   FROM films f LEFT JOIN film_stats s ON s.film_id=f.id WHERE f.id IN (' . implode(',', $ids) . ')') as $f)
     $films[(int)$f['film_id']] = $f;
   $rated = array_intersect_key($ratings, array_flip($ids)) !== [];
   ?>
   <table>
-    <tr><th class="num">#</th><th>Film</th><th>Typ</th><?= $rated ? '<th>Tvoje hodnocení</th>' : '' ?>
+    <tr><th class="num">#</th><th>Film</th><th>Typ</th><?= $rated ? '<th>Tvoje hodnocení</th>' : '' ?><?= RATING_HEADERS ?>
       <th class="num">Odhad pro tebe</th><th class="num">Průměrný divák</th><th class="num">Rozdíl</th><th class="num">Shoda vkusu</th></tr>
     <?php $rank = 0; foreach ($indexes as $i): $filmId = $model['film_ids'][$i]; $f = $films[$filmId] ?? null; if (!$f) continue;
       [$predicted, $cosine] = $scores[$i]; $you = clip_stars($predicted); $average = clip_stars($model['film_average'][$i]); ?>
       <tr><td class="num"><?= ++$rank ?></td><td><?= film_link($f) ?></td>
         <td><?= h($f['kind']) ?><?= $f['kind'] === 'seriál' ? ' <small>(<a href="' . h(url(['view' => 'recommend', 'id' => $userId, 'series' => $filmId])) . '">epizody</a>)</small>' : '' ?></td>
         <?= $rated ? '<td class="stars">' . (isset($ratings[$filmId]) ? stars($ratings[$filmId]) : '') . '</td>' : '' ?>
-        <td class="num"><?= percent($you) ?></td><td class="num"><?= percent($average) ?></td>
+        <?= rating_cells($f) ?><td class="num"><?= percent($you) ?></td><td class="num"><?= percent($average) ?></td>
         <td class="num"><?= sprintf('%+d', round(($you - $average) * 20)) ?>&nbsp;%</td>
         <td class="num"><?= number_format($cosine, 2, ',', '') ?></td></tr>
     <?php endforeach ?>
@@ -443,15 +443,15 @@ function series_page(int $offset): void
   $total = (int)value('SELECT COUNT(*) FROM series_stats WHERE users >= ?', [$min]);
   echo pager($total);
   $rows = query("SELECT t.series_id AS film_id, t.users, t.episodes, t.spread, f.title, f.year, f.kind, f.slug, f.parent_id,
-                        s.average, s.rating_count
+                        s.average, s.rating_count, s.csfd_percent, s.csfd_count
                  FROM series_stats t JOIN films f ON f.id=t.series_id LEFT JOIN film_stats s ON s.film_id=t.series_id
                  WHERE t.users >= ? ORDER BY t.$sort $direction, t.series_id LIMIT " . PAGE_SIZE . ' OFFSET ' . $offset, [$min]);
   ?>
   <table>
-    <tr><th>Seriál</th><?= sort_header('Rozptyl', 'spread', 'desc', 'num') ?><?= sort_header('Diváků', 'users', 'desc', 'num') ?>
+    <tr><th>Seriál</th><?= RATING_HEADERS ?><?= sort_header('Rozptyl', 'spread', 'desc', 'num') ?><?= sort_header('Diváků', 'users', 'desc', 'num') ?>
       <?= sort_header('Epizod', 'episodes', 'desc', 'num') ?></tr>
     <?php foreach ($rows as $r): ?>
-      <tr><td><?= film_link($r) ?></td><td class="num"><?= number_format((float)$r['spread'], 2, ',', '') ?></td>
+      <tr><td><?= film_link($r) ?></td><?= rating_cells($r) ?><td class="num"><?= number_format((float)$r['spread'], 2, ',', '') ?></td>
         <td class="num"><?= n($r['users']) ?></td><td class="num"><?= n($r['episodes']) ?></td></tr>
     <?php endforeach ?>
   </table>
@@ -474,10 +474,12 @@ function film_page(int $id, int $offset): void
   $sum = 0;
   foreach ($distribution as $d)
     $sum += $d['stars'] * $d['count'];
+  $csfdRating = query('SELECT csfd_percent, csfd_count FROM film_pages WHERE film_id=? AND csfd_percent IS NOT NULL', [$id])[0] ?? null;
   $genres = array_map(fn($g) => h(GENRE_NAMES[$g['genre']] ?? $g['genre']),
                      query('SELECT genre FROM film_genres WHERE film_id=? ORDER BY genre', [$id]));
   echo '<p>' . h($film['kind']) . ($genres ? ' · ' . implode(', ', $genres) : '') . ($film['parent_title'] ? ' · patří k <a href="' . h(url(['view' => 'film', 'id' => $film['parent_id']])) . '">' . h($film['parent_title']) . '</a>' : '') .
-       ' · ' . n($total) . ' hodnocení' . ($total ? ' · ' . percent($sum / $total) : '') .
+       ($csfdRating ? ' · ČSFD ' . (int)$csfdRating['csfd_percent'] . "\u{00a0}% z " . n($csfdRating['csfd_count']) . ' hodnocení' : '') .
+       ' · naše ' . ($total ? percent($sum / $total) . ' z ' : '') . n($total) . ' hodnocení' .
        ' · <a href="' . h($csfd) . '">na ČSFD</a></p>';
   $seriesStats = query('SELECT users, episodes, spread FROM series_stats WHERE series_id=?', [$id])[0] ?? null;
   if ($seriesStats)
@@ -530,16 +532,16 @@ function search_page(string $q): void
   }
   $like = '%' . addcslashes($q, '%_\\') . '%';
   [$condition, $params] = title_search($q, $like);
-  $films = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average
+  $films = query("SELECT f.id AS film_id, f.title, f.year, f.kind, f.slug, f.parent_id, s.rating_count, s.average, s.csfd_percent, s.csfd_count
                   FROM film_stats s JOIN films f ON f.id=s.film_id WHERE $condition
                   ORDER BY s.rating_count DESC LIMIT 50", $params);
   $users = query('SELECT id AS user_id, name, rating_count FROM users WHERE name LIKE ? ORDER BY rating_count DESC LIMIT 50', [$like]);
   ?>
   <h2>Filmy</h2>
   <table>
-    <tr><th>Film</th><th>Typ</th><th class="num">Hodnocení</th><th class="num">Procenta</th></tr>
+    <tr><th>Film</th><th>Typ</th><?= RATING_HEADERS ?></tr>
     <?php foreach ($films as $r): ?>
-      <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><td class="num"><?= n($r['rating_count']) ?></td><td class="num"><?= average($r) ?></td></tr>
+      <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><?= rating_cells($r) ?></tr>
     <?php endforeach ?>
   </table>
   <h2>Uživatelé</h2>
@@ -552,11 +554,12 @@ function search_page(string $q): void
   <?php
 }
 
-function average(array $row): string
+/** Cells under RATING_HEADERS: ČSFD's rating (from the film's ČSFD page) and ours (from the scraped ratings). */
+function rating_cells(array $row): string
 {
-  if ($row['average'] === null)
-    return '';
-  return percent($row['average']) . ' <small>(' . n($row['rating_count']) . ')</small>';
+  $csfd = isset($row['csfd_percent']) ? (int)$row['csfd_percent'] . "\u{00a0}% <small>(" . n($row['csfd_count']) . ')</small>' : '–';
+  $ours = isset($row['average']) ? percent($row['average']) . ' <small>(' . n($row['rating_count']) . ')</small>' : '–';
+  return "<td class=\"num\">$csfd</td><td class=\"num\">$ours</td>";
 }
 
 function distribution(array $rows): void

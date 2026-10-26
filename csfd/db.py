@@ -98,6 +98,16 @@ EXTRA_INDEXES = [
 ]
 
 
+# Columns added after the first deployment: (table, column, statements). Both are cheap (MariaDB adds nullable
+# columns instantly); the film pages read before 26 Oct 2026 are read again for ČSFD's rating.
+ADDED_COLUMNS = [
+    ("film_pages", "csfd_percent", ["ALTER TABLE film_pages ADD COLUMN csfd_percent TINYINT UNSIGNED NULL, "
+                                    "ADD COLUMN csfd_count INT UNSIGNED NULL", "DELETE FROM film_pages"]),
+    ("film_stats", "csfd_percent", ["ALTER TABLE film_stats ADD COLUMN csfd_percent TINYINT UNSIGNED NULL, "
+                                    "ADD COLUMN csfd_count INT UNSIGNED NULL"]),
+]
+
+
 # Columns widened after the first deployment: (table, column, length, ALTER statement).
 WIDENED_COLUMNS = [
     ("films", "slug", 1000, "ALTER TABLE films MODIFY slug VARCHAR(1000) NOT NULL"),
@@ -113,6 +123,12 @@ def ensure_indexes(connection):
             row = cursor.fetchone()
             if row and row[0] < length:
                 cursor.execute(ddl)
+        for table, column, statements in ADDED_COLUMNS:
+            cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE() "
+                           "AND table_name=%s AND column_name=%s", (table, column))
+            if not cursor.fetchone():
+                for statement in statements:
+                    cursor.execute(statement)
         for table, name, ddl in EXTRA_INDEXES:
             cursor.execute("SELECT 1 FROM information_schema.statistics WHERE table_schema=DATABASE() "
                            "AND table_name=%s AND index_name=%s LIMIT 1", (table, name))
@@ -252,7 +268,10 @@ def refresh_film_stats(connection, state_dir=None, seconds=0):
             if film_id in counts:
                 kinds[film_id] = sys.intern(kind or "")
                 titles[film_id] = title
-    rows = [(film_id, count, round(sums[film_id] / count, 3), kinds.get(film_id, ""), titles.get(film_id, ""))
+    csfd = {film_id: (percent, count) for film_id, percent, count in run_statement(
+        connection, "SELECT film_id, csfd_percent, csfd_count FROM film_pages WHERE csfd_percent IS NOT NULL")}
+    rows = [(film_id, count, round(sums[film_id] / count, 3), kinds.get(film_id, ""), titles.get(film_id, ""),
+             *csfd.get(film_id, (None, None)))
             for film_id, count in sorted(counts.items())]
 
     with connection.cursor() as cursor:
@@ -276,8 +295,8 @@ def refresh_film_stats(connection, state_dir=None, seconds=0):
         connection.begin()
         for start in range(0, len(rows), 10000):
             progress(f"writing rows {start:,}/{len(rows):,}")
-            cursor.executemany("INSERT INTO film_stats_new (film_id, rating_count, average, kind, title) "
-                               "VALUES (%s, %s, %s, %s, %s)", rows[start:start + 10000])
+            cursor.executemany("INSERT INTO film_stats_new (film_id, rating_count, average, kind, title, csfd_percent, "
+                               "csfd_count) VALUES (%s, %s, %s, %s, %s, %s, %s)", rows[start:start + 10000])
         connection.commit()
         progress("building indexes")
         cursor.execute("ALTER TABLE film_stats_new " + ", ".join(f"ADD KEY {key} ({columns})"
@@ -291,7 +310,7 @@ def refresh_film_stats(connection, state_dir=None, seconds=0):
 
     # The kinds for the film list's filter, so the page doesn't count them on every load.
     per_kind = {}
-    for _, _, _, kind, _ in rows:
+    for _, _, _, kind, *_ in rows:
         per_kind[kind] = per_kind.get(kind, 0) + 1
     top = sorted(per_kind, key=lambda kind: (-per_kind[kind], kind))[:15]
     while len(json.dumps(top, ensure_ascii=False)) > 255:  # crawl_state.value is VARCHAR(255)
@@ -397,13 +416,14 @@ def films_without_genres(connection, min_ratings, limit):
 
 
 @reconnecting
-def save_film_genres(connection, pages):
-    """Stores [(film ID, genres)] read from the films' ČSFD pages, in one transaction (single writes are slow on NFS).
-    In film_genres, which the web reads, they replace Wikidata's (except "antologie", which ČSFD doesn't have)."""
+def save_film_pages(connection, pages):
+    """Stores [(film ID, parse.FilmPage)] read from the films' ČSFD pages, in one transaction (single writes are slow
+    on NFS). In film_genres, which the web reads, the genres replace Wikidata's (except "antologie", which ČSFD
+    doesn't have); ČSFD's rating goes to film_pages and film_stats."""
     if not pages:
         return
     ids = [film_id for film_id, _ in pages]
-    rows = [(film_id, genre) for film_id, genres in pages for genre in genres]
+    rows = [(film_id, genre) for film_id, page in pages for genre in page.genres]
     marks = ",".join(["%s"] * len(ids))
     connection.begin()
     try:
@@ -413,8 +433,12 @@ def save_film_genres(connection, pages):
             if rows:
                 cursor.executemany("INSERT INTO csfd_genres (film_id, genre) VALUES (%s, %s)", rows)
                 cursor.executemany("INSERT IGNORE INTO film_genres (film_id, genre) VALUES (%s, %s)", rows)
-            cursor.executemany("INSERT INTO film_pages (film_id, fetched_at) VALUES (%s, NOW()) "
-                               "ON DUPLICATE KEY UPDATE fetched_at=NOW()", [(film_id,) for film_id in ids])
+            cursor.executemany("INSERT INTO film_pages (film_id, fetched_at, csfd_percent, csfd_count) "
+                               "VALUES (%s, NOW(), %s, %s) ON DUPLICATE KEY UPDATE fetched_at=VALUES(fetched_at), "
+                               "csfd_percent=VALUES(csfd_percent), csfd_count=VALUES(csfd_count)",
+                               [(film_id, page.percent, page.rating_count) for film_id, page in pages])
+            cursor.executemany("UPDATE film_stats SET csfd_percent=%s, csfd_count=%s WHERE film_id=%s",
+                               [(page.percent, page.rating_count, film_id) for film_id, page in pages])
         connection.commit()
     except BaseException:
         connection.rollback()

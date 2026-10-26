@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import db, export, genres
 from .fetch import Blocked, ChallengeNotSolved, FetchError, NotFound, ScrapeDoFetcher, film_url, profile_url, ratings_url
-from .parse import NotRatingsPage, parse_fanclub, parse_film_genres, parse_ratings_page
+from .parse import FilmPage, NotRatingsPage, parse_fanclub, parse_film_page, parse_ratings_page
 
 DEFAULT_CONFIG = os.path.expanduser("~/csfd-config.ini")
 log = logging.getLogger("csfd")
@@ -283,15 +283,16 @@ def make_fetcher(config):
                            render=crawl.get("render", "auto"))
 
 
-def read_film_genres(connection, fetcher, film_ids, workers, seconds=0):
-    """Reads the films' ČSFD pages in parallel and stores their genres, until `seconds` have passed (0 = no limit).
+def read_film_pages(connection, fetcher, film_ids, workers, seconds=0):
+    """Reads the films' ČSFD pages in parallel and stores their genres and ČSFD's rating, until `seconds` have passed
+    (0 = no limit).
     Returns how many pages were stored."""
     deadline = time.monotonic() + seconds if seconds else None
     def fetch(film_id):
         try:
-            return film_id, parse_film_genres(fetcher.get(film_url(film_id)))
+            return film_id, parse_film_page(fetcher.get(film_url(film_id)))
         except NotFound:
-            return film_id, []
+            return film_id, FilmPage([], None, None)
         except Blocked:
             raise
         except (FetchError, NotRatingsPage) as e:
@@ -304,9 +305,9 @@ def read_film_genres(connection, fetcher, film_ids, workers, seconds=0):
         for start in range(0, len(film_ids), 2 * workers):
             if deadline and time.monotonic() > deadline:
                 break
-            pages = [(film_id, genres) for film_id, genres in pool.map(fetch, film_ids[start:start + 2 * workers])
-                     if genres is not None]
-            db.save_film_genres(connection, pages)
+            pages = [(film_id, page) for film_id, page in pool.map(fetch, film_ids[start:start + 2 * workers])
+                     if page is not None]
+            db.save_film_pages(connection, pages)
             stored += len(pages)
     return stored
 
@@ -354,7 +355,7 @@ def run_command(args, config):
         connection = db.connect(config)
         db.create_schema(connection)
         film_ids = db.films_without_genres(connection, args.min_ratings, args.pages)
-        stored = read_film_genres(connection, make_fetcher(config), film_ids, args.workers, args.seconds)
+        stored = read_film_pages(connection, make_fetcher(config), film_ids, args.workers, args.seconds)
         print(f"Read the genres of {stored} of {len(film_ids)} film(s).")
     elif args.command == "film-stats":
         connection = db.connect(config)

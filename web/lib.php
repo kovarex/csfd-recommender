@@ -9,6 +9,9 @@ const GENRE_NAMES = ['scifi' => 'sci-fi', 'fantasy' => 'fantasy', 'horor' => 'ho
   'romanticky' => 'romantický', 'animovany' => 'animovaný', 'anime' => 'anime', 'dokumentarni' => 'dokumentární',
   'valecny' => 'válečný', 'western' => 'western', 'historicky' => 'historický', 'zivotopisny' => 'životopisný',
   'muzikal' => 'muzikál', 'rodinny' => 'rodinný', 'mysteriozni' => 'mysteriózní', 'antologie' => 'antologie'];
+// Columns of ČSFD's rating (read from the film's ČSFD page, see crawl film-genres) and ours (from the scraped ratings),
+// side by side: ours differs, since only part of ČSFD's users is scraped. Filled by rating_cells in index.php.
+const RATING_HEADERS = '<th class="num">ČSFD</th><th class="num">Naše</th>';
 // Not a ČSFD kind: the episodes of series that are anthologies (see allowed_films in index.php).
 const ANTHOLOGY_EPISODE = 'antologická epizoda';
 // A series counts as an anthology when Wikidata says so (genre "antologie") and the same viewer rates its episodes
@@ -176,8 +179,7 @@ function film_link(array $row): string
 {
   $title = h($row['title']) . ($row['year'] ? ' (' . (int)$row['year'] . ')' : '');
   return '<a href="' . h(url(['view' => 'film', 'id' => $row['film_id']])) . '">' . $title . '</a>' .
-         ' <small>(<a href="' . h(csfd_film_url((int)$row['film_id'], $row['slug'], $row['parent_id'])) . '">csfd</a>' .
-         (isset($row['average']) ? ' ' . percent($row['average']) : '') . ')</small>';
+         ' <small>(<a href="' . h(csfd_film_url((int)$row['film_id'], $row['slug'], $row['parent_id'])) . '">csfd</a>)</small>';
 }
 
 // ČSFD's percentage is the average rating times 20 (odpad = 0 %); ours is computed from the scraped ratings.

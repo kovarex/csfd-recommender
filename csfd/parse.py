@@ -46,16 +46,32 @@ GENRE_LINK_RE = re.compile(r'<a href="/zanry/\d+-([^/"]+)/"')
 FILM_PAGE_RE = re.compile(r'<link rel="canonical" href="https://www\.csfd\.cz/film/')
 
 
-def parse_film_genres(page_html):
-    """Genres of a film page (https://www.csfd.cz/film/<id>/prehled/) as URL slugs without dashes, e.g. "dokumentarni"
-    or "scifi", which are the genre names in film_genres."""
+PERCENT_RE = re.compile(r'<div class="film-rating-average[^"]*">\s*(\d+)\s*%')
+RATING_COUNT_RE = re.compile(r'<h2>\s*Hodnocení\s*<span class="counter">\(([\d\s\xa0]+)\)')
+
+
+@dataclass
+class FilmPage:
+    # URL slugs without dashes, e.g. "dokumentarni" or "scifi", which are the genre names in film_genres.
+    genres: list[str]
+    # ČSFD's own rating and number of ratings; None when ČSFD shows none (too few ratings).
+    percent: int | None
+    rating_count: int | None
+
+
+def parse_film_page(page_html):
+    """Genres and ČSFD's rating of a film page (https://www.csfd.cz/film/<id>/prehled/)."""
     if not FILM_PAGE_RE.search(page_html):
         raise NotRatingsPage("not a film page")
+    genres = []
     start = page_html.find('<div class="genres">')
-    if start < 0:
-        return []
-    box = page_html[start:page_html.find("</div>", start)]
-    return list(dict.fromkeys(slug.replace("-", "")[:20] for slug in GENRE_LINK_RE.findall(box)))
+    if start >= 0:
+        box = page_html[start:page_html.find("</div>", start)]
+        genres = list(dict.fromkeys(slug.replace("-", "")[:20] for slug in GENRE_LINK_RE.findall(box)))
+    percent = PERCENT_RE.search(page_html)
+    count = RATING_COUNT_RE.search(page_html)
+    return FilmPage(genres, int(percent.group(1)) if percent else None,
+                    int(re.sub(r"\D", "", count.group(1))) if count else None)
 
 
 FAN_RE = re.compile(r'<a href="/uzivatel/(\d+)-[^/"]*/')
