@@ -40,7 +40,7 @@ function overview_page(): void
     <div><b><?= n($ratings) ?></b>hodnocení</div>
     <div><b><?= n($existing) ?></b>uživatelů</div>
     <div><b><?= n($films) ?></b>filmů a seriálů</div>
-    <div><b><?= n($next - 1) ?></b>prošlých ID (z asi 445 000)</div>
+    <div><b><?= n($next - 1) ?></b>prošlých ID (z asi 1 018 000, nejvyšší ID na ČSFD 26. 10. 2026)</div>
     <div><b><?= $credits === null ? '?' : n($credits) ?></b>kreditů scrape.do</div>
   </div>
   <h2>Uživatelé podle stavu</h2>
