@@ -151,8 +151,10 @@ def run_statement(connection, sql, params=None):
 
 
 # film_stats' secondary indexes (as in schema.sql), built after the rows are written.
-FILM_STATS_KEYS = {"rating_count": "rating_count", "average": "average", "kind_count": "kind, rating_count",
-                   "kind_average": "kind, average"}
+# The count keys also hold the average, so the film list by average above a minimum count (FORCE INDEX in
+# web/index.php) reads the index alone: looking up 7 500 rows took 10 s on NFS.
+FILM_STATS_KEYS = {"rating_count": "rating_count, average", "average": "average",
+                   "kind_count": "kind, rating_count, average", "kind_average": "kind, average"}
 
 
 def kill_leftover_film_stats_queries(connection):

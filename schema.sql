@@ -111,9 +111,9 @@ CREATE TABLE IF NOT EXISTS film_stats (
   -- From film_pages, so the lists show ČSFD's rating next to ours without a join.
   csfd_percent TINYINT UNSIGNED NULL,
   csfd_count INT UNSIGNED NULL,
-  KEY rating_count (rating_count),
+  KEY rating_count (rating_count, average),
   KEY average (average),
-  KEY kind_count (kind, rating_count),
+  KEY kind_count (kind, rating_count, average),
   KEY kind_average (kind, average),
   FULLTEXT KEY title (title)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
