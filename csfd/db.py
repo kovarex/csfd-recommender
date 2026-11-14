@@ -493,6 +493,19 @@ def prioritize_users(connection, user_ids, rescrape_hours=None):
 
 
 @reconnecting
+def rescrape_users_fully(connection, user_ids):
+    """Forgets the users' stored ratings and queues them for a scrape of every page, so ratings changed further back
+    in the list or deleted on ČSFD are caught too (a refresh reads only up to the first unchanged page)."""
+    if not user_ids:
+        return
+    marks = ','.join(['%s'] * len(user_ids))
+    with connection.cursor() as cursor:
+        cursor.execute(f"DELETE FROM ratings WHERE user_id IN ({marks})", user_ids)
+        cursor.execute(f"UPDATE users SET status=%s, pages_done=0, priority={PRIORITY}, error=NULL WHERE id IN ({marks})",
+                       (WAITING, *user_ids))
+
+
+@reconnecting
 def save_fans(connection, user_id, fan_ids):
     with connection.cursor() as cursor:
         cursor.execute("DELETE FROM fans WHERE user_id=%s", (user_id,))

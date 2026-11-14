@@ -213,6 +213,9 @@ def main():
     prioritize.add_argument("--fans-max-age-hours", type=float,
                             help="also prioritize the listed users' fan clubs, read from their profiles when the last "
                                  "reading is older than this")
+    prioritize.add_argument("--full-days", type=float, default=7,
+                            help="every this many days, scrape the listed users and their fans again from scratch, "
+                                 "which also catches ratings changed far back in the list or deleted")
     sub.add_parser("stats", help="show what is in the database")
     genres_parser = sub.add_parser("genres", help="download film genres from Wikidata into the film_genres table")
     genres_parser.add_argument("--max-age-hours", type=float, default=0,
@@ -347,6 +350,10 @@ def run_command(args, config):
                 read_fans(connection, make_fetcher(config), user_ids)
                 db.set_state(connection, "fans_at", int(time.time()))
             user_ids = list(dict.fromkeys(user_ids + db.get_fans(connection, user_ids)))
+        if time.time() - int(db.get_state(connection, "full_rescrape_at", 0)) >= args.full_days * 86400:
+            db.rescrape_users_fully(connection, user_ids)
+            db.set_state(connection, "full_rescrape_at", int(time.time()))
+            print(f"Queued {len(user_ids)} user(s) for a full scrape.")
         db.prioritize_users(connection, user_ids, args.rescrape_hours)
         print(f"Prioritized {len(user_ids)} user(s).")
     elif args.command == "film-genres":

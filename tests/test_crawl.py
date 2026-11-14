@@ -471,6 +471,17 @@ class CrawlTest(unittest.TestCase):
         db.prioritize_users(self.connection, [1, 2])  # The next run keeps it a refresh.
         self.assertEqual(self.query("SELECT priority FROM users WHERE id=1"), ((db.REFRESH,),))
 
+    def test_full_rescrape_reads_every_page_and_drops_deleted_ratings(self):
+        pages = {url(1, p): ratings_page(1, p, 2, [(100 + p, "stars-4")]) for p in (1, 2)}
+        self.crawl(FakeFetcher(pages))
+        pages = {url(1, 1): ratings_page(1, 1, 2, [(103, "stars-5")]), url(1, 2): ratings_page(1, 2, 2, [(102, "stars-1")])}
+        db.rescrape_users_fully(self.connection, [1, 9])
+        db.prioritize_users(self.connection, [1, 9], rescrape_hours=24)
+        self.assertEqual(self.query("SELECT priority FROM users WHERE id=1"), ((db.PRIORITY,),))
+        self.crawl(FakeFetcher(pages))
+        self.assertEqual(self.query("SELECT film_id, stars FROM ratings WHERE user_id=1 ORDER BY film_id"),
+                         ((102, 1), (103, 5)))
+
     def test_series_stats_measure_how_differently_a_viewer_rates_episodes(self):
         db.create_schema(self.connection)
         with self.connection.cursor() as cursor:
