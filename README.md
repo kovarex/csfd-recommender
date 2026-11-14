@@ -65,6 +65,10 @@ at least 200 for the similar users list) and uploads it to `/home/protected/csfd
 `?view=recommend&id=<user>` (linked as „Doporučení“ from every user) then computes the user's taste from their current
 ratings in the database (`web/model.php`, the same maths as `ml.recommend`, about 0.5 s for 5000 ratings) and shows
 the best films, gems, personal trash, films closest to and farthest from the taste, and similar users.
+The data can also come without SSH: every week NFS exports the database for download over HTTPS in parts
+(`publish-export` in `run-crawl.sh`, written over runs, to `/home/public/data/<hash of the scrape.do token>/current/`
+with `manifest.txt`). `./download-data.sh <address>` on the PC downloads it to `~/csfd-data` (8 files at once, skips
+what it has); the address is remembered, and `./update-model.sh` then uses it instead of the export over SSH.
 The steps by hand:
 
 1. On NFS, export the database (about 100 MB per 10 million ratings) to `~/exports`:

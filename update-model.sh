@@ -1,6 +1,7 @@
 #!/bin/sh
 # On the PC (WSL): exports the database on NFS, downloads it, trains the model and uploads it for the web pages,
-# where every user's recommendations are then computed on the fly. Run from anywhere, as often as you like:
+# where every user's recommendations are then computed on the fly. After ./download-data.sh was run once with the
+# export's address, the data comes from the weekly export over HTTPS instead. Run from anywhere, as often as you like:
 #   ./update-model.sh
 # SSH asks for the NFS password once per run (or never after `ssh-copy-id` with the login below).
 set -e
@@ -12,10 +13,15 @@ SSH_OPTIONS="-o ControlMaster=auto -o ControlPath=$HOME/.ssh/csfd-%r@%h -o Contr
 mkdir -p "$HOME/.ssh" "$DATA"
 [ -f .venv/bin/activate ] && . .venv/bin/activate
 
-echo "== Exporting the database on NFS"
-ssh $SSH_OPTIONS "$NFS" 'cd /home/private/csfd-recommender && python3 -m csfd.crawl export'
-echo "== Downloading the export to $DATA"
-scp $SSH_OPTIONS "$NFS:/home/private/exports/*.gz" "$DATA/"
+if [ -s "$HOME/.csfd-data-url" ]; then
+  echo "== Downloading the weekly export to $DATA"
+  CSFD_DATA="$DATA" ./download-data.sh
+else
+  echo "== Exporting the database on NFS"
+  ssh $SSH_OPTIONS "$NFS" 'cd /home/private/csfd-recommender && python3 -m csfd.crawl export'
+  echo "== Downloading the export to $DATA"
+  scp $SSH_OPTIONS "$NFS:/home/private/exports/*.gz" "$DATA/"
+fi
 echo "== Training"
 python3 -m ml.train --data "$DATA" --out model.npz
 python3 -m ml.publish --data "$DATA" --model model.npz --out web-model.bin

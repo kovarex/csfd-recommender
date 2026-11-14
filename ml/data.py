@@ -1,5 +1,6 @@
 """Loading the CSV export written by `python3 -m csfd.crawl export`."""
 
+import glob
 import os
 
 import numpy as np
@@ -7,8 +8,10 @@ import pandas as pd
 
 
 def load_ratings(directory):
-    return pd.read_csv(os.path.join(directory, "ratings.csv.gz"),
-                       dtype={"user_id": np.int32, "film_id": np.int32, "stars": np.int8})
+    """From the parts downloaded by download-data.sh (ratings-0000.csv.gz, ...), or the single file of an export."""
+    paths = sorted(glob.glob(os.path.join(directory, "ratings-*.csv.gz"))) or [os.path.join(directory, "ratings.csv.gz")]
+    dtype = {"user_id": np.int32, "film_id": np.int32, "stars": np.int8}
+    return pd.concat([pd.read_csv(path, dtype=dtype) for path in paths], ignore_index=True)
 
 
 def load_films(directory):

@@ -222,6 +222,12 @@ def main():
                                help="only download when the last download is older than this")
     export_parser = sub.add_parser("export", help="write ratings, films and users to gzipped CSV for training")
     export_parser.add_argument("--dir", default=os.path.expanduser("~/exports"))
+    publish_export = sub.add_parser("publish-export", help="export the database for download over HTTP in parts, "
+                                                           "continuing on every run until it is complete")
+    publish_export.add_argument("--public-dir", default="/home/public",
+                                help="web root; the export goes to data/<hash of the scrape.do token>/current/")
+    publish_export.add_argument("--max-age-hours", type=float, default=168, help="start a new export after this")
+    publish_export.add_argument("--seconds", type=float, default=150, help="stop starting files after this")
     series_stats = sub.add_parser("series-stats", help="rebuild how differently viewers rate each series' episodes")
     series_stats.add_argument("--max-age-hours", type=float, default=0,
                               help="only rebuild when the last rebuild is older than this")
@@ -404,6 +410,16 @@ def run_command(args, config):
             print(f"Genres of {len(film_genres)} films saved in {time.time() - started:.0f} s.")
     elif args.command == "export":
         export.export(db.connect(config), args.dir)
+    elif args.command == "publish-export":
+        base = os.path.join(args.public_dir, "data", export.published_name(config["scrape_do"]["token"]))
+        if os.path.exists(os.path.join(base, "next")) or \
+                time.time() - export.published_at(base) >= args.max_age_hours * 3600:
+            connection = db.connect(config)
+            db.create_schema(connection)
+            if export.export_step(connection, base, args.seconds):
+                print(f"Export published in {base}/current.")
+            else:
+                print("Export continues in the next run.")
     elif args.command == "stats":
         connection = db.connect(config)
         db.create_schema(connection)

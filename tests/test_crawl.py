@@ -341,6 +341,28 @@ class CrawlTest(unittest.TestCase):
             with gzip.open(os.path.join(directory, "ratings.csv.gz"), "rt") as f:
                 self.assertEqual(sorted(csv.reader(f))[:-1], [["1", "100", "5"], ["450", "101", "0"]])
 
+    def test_published_export_continues_over_runs(self):
+        import csv, gzip, tempfile
+        from csfd import export
+        db.create_schema(self.connection)
+        for user_id in (1, 3, 7):
+            db.requeue_user(self.connection, user_id)
+        self.crawl(FakeFetcher({url(i): ratings_page(i, 1, 1, [(100 + i, "stars-4")]) for i in (1, 3, 7)}))
+        with tempfile.TemporaryDirectory() as base, unittest.mock.patch.object(export, "RATINGS_USER_STEP", 3):
+            # With no time, one file per run: ratings of users 0-2, 3-5 and 6-7, then films, genres and users.
+            results = [export.export_step(self.connection, base, 0) for _ in range(6)]
+            self.assertEqual(results, [False] * 5 + [True])
+            with open(os.path.join(base, "current", "manifest.txt")) as f:
+                names = [line.split()[1] for line in f if not line.startswith("#")]
+            self.assertEqual(names[:3], ["ratings-0000.csv.gz", "ratings-0001.csv.gz", "ratings-0002.csv.gz"])
+            rows = []
+            for name in names[:3]:
+                with gzip.open(os.path.join(base, "current", name), "rt") as f:
+                    rows += list(csv.reader(f))[1:]
+            self.assertEqual(rows, [["1", "101", "4"], ["3", "103", "4"], ["7", "107", "4"]])
+            self.assertTrue(export.export_step(self.connection, base, 60))  # A new export replaces the old one.
+            self.assertEqual(sorted(os.listdir(base)), ["current"])
+
     def test_save_genres_replaces_the_table(self):
         db.create_schema(self.connection)
         db.save_genres(self.connection, {1: {"scifi", "drama"}, 2: {"komedie"}})
