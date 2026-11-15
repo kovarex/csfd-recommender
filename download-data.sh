@@ -1,7 +1,7 @@
 #!/bin/sh
-# On the PC (WSL): downloads the database export that NFS publishes weekly into ~/csfd-data over HTTPS, with no SSH
-# and no password. The address is the one from the project notes, ending in /current/; it is remembered after the
-# first run:
+# On the PC (WSL): downloads the database export that NFS publishes weekly into ~/csfd-data over HTTPS (ratings.csv.gz,
+# films.csv.gz, genres.csv.gz, users.csv.gz), with no SSH and no password. The address is the one from the project
+# notes, ending in /current/; it is remembered after the first run:
 #   ./download-data.sh https://csfd-recommender.com/data/<hash>/current/
 #   ./download-data.sh
 # Files already downloaded whole are skipped, so an interrupted download continues when run again.
@@ -15,8 +15,11 @@ if [ ! -s "$URL_FILE" ]; then
 fi
 URL=$(cat "$URL_FILE")
 URL=${URL%/}
-mkdir -p "$DATA"
-cd "$DATA"
+# The export comes in parts (NFS can't write it in one run); they are kept in parts/ so that the next download only
+# fetches what changed, and joined into one ratings.csv.gz next to films, genres and users.
+PARTS="$DATA/parts"
+mkdir -p "$PARTS"
+cd "$PARTS"
 curl -fsS "$URL/manifest.txt" -o manifest.txt
 head -1 manifest.txt
 missing() { grep -v '^#' manifest.txt | while read -r size name; do
@@ -28,6 +31,18 @@ if [ -n "$(missing)" ]; then
   echo "Not downloaded whole: $(missing | tr '\n' ' ')- run again"
   exit 1
 fi
-# Ratings files of an older export that this one no longer has (and the single file of an export over SSH).
-for f in ratings*.csv.gz; do grep -q " $f\$" manifest.txt || rm -f "$f"; done
-echo "Done: $DATA ($(du -sh . | cut -f1))"
+# Parts of an older export that this one no longer has.
+for f in ratings-*.csv.gz; do grep -q " $f\$" manifest.txt || rm -f "$f"; done
+if ! cmp -s manifest.txt joined-manifest.txt || [ ! -f "$DATA/ratings.csv.gz" ]; then
+  echo "Joining the ratings into $DATA/ratings.csv.gz..."
+  # The header of the first part only; gzip -1 because it's fast and the file stays about the same size.
+  { first=1; for f in ratings-*.csv.gz; do
+      if [ -n "$first" ]; then zcat "$f"; first=; else zcat "$f" | tail -n +2; fi
+    done; } | gzip -1 > "$DATA/ratings.csv.gz.tmp"
+  mv "$DATA/ratings.csv.gz.tmp" "$DATA/ratings.csv.gz"
+  cp films.csv.gz genres.csv.gz users.csv.gz "$DATA/"
+  cp manifest.txt joined-manifest.txt
+fi
+# Parts downloaded straight into the data folder by an older version of this script.
+rm -f "$DATA"/ratings-*.csv.gz "$DATA/manifest.txt"
+echo "Done: $DATA/ratings.csv.gz ($(du -h "$DATA/ratings.csv.gz" | cut -f1)), films, genres, users"
