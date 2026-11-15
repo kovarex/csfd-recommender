@@ -4,3 +4,4 @@ __pycache__/
 model.npz
 web-model.bin
 .venv/
+sweep/

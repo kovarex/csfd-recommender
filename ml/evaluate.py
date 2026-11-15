@@ -2,8 +2,8 @@
 
 The user's ratings are split into parts (5 by default); each part is hidden in turn, the user's taste is folded in
 from the rest, and the hidden ratings are predicted. The errors are compared with simple guesses, so it shows what the
-taste vector adds. For a fair test, train with the user left out (`ml.train --exclude-users 63015`), otherwise the
-film vectors have seen their ratings.
+taste vector adds, and a table shows the guesses for each number of stars actually given. For a fair test, train with
+the users left out (`ml.train --exclude-users 63015`), otherwise the film vectors have seen their ratings.
 
     python3 -m ml.evaluate --data ~/csfd-data --model model.npz --users 63015
     python3 -m ml.evaluate --data ~/csfd-data --model model.npz --random 1000
@@ -34,17 +34,53 @@ def cross_validate(model, positions, stars, folds, rng):
             (("model", predicted), ("film average", film_average), ("film average + your strictness", user_adjusted))}
 
 
-def report(stars, guesses):
-    print(f"  {'':32}  RMSE   MAE  pořadí*  top 10 % průměr**")
+def random_users(ratings, model, count, rng, min_ratings=50):
+    counts = ratings.loc[ratings["film_id"].isin(model["film_ids"]), "user_id"].value_counts()
+    return [int(i) for i in rng.choice(counts[counts >= min_ratings].index.to_numpy(), count, replace=False)]
+
+
+def evaluate_users(model, ratings, user_ids, folds, rng, skipped=print):
+    """For each user with enough ratings of films the model knows: (user_id, their ratings, stars, guesses)."""
+    film_index = pd.Series(np.arange(len(model["film_ids"])), index=model["film_ids"])
+    ratings = ratings[ratings["user_id"].isin(user_ids) & ratings["film_id"].isin(film_index.index)]
+    results = []
+    for user_id, mine in ratings.groupby("user_id", sort=False):
+        if len(mine) < folds * 2:
+            skipped(f"User {user_id}: only {len(mine)} ratings of films the model knows, skipped")
+            continue
+        stars = mine["stars"].to_numpy(np.float32)
+        results.append((user_id, mine, stars,
+                        cross_validate(model, film_index[mine["film_id"]].to_numpy(), stars, folds, rng)))
+    return results
+
+
+def metrics(stars, values):
+    """RMSE, MAE, rank agreement (Spearman) and the user's average over the tenth guessed highest."""
+    error = values - stars
+    rank = pd.Series(values).rank().corr(pd.Series(stars).rank())  # Spearman, without scipy
     top = max(1, len(stars) // 10)
+    return (float(np.sqrt((error ** 2).mean())), float(np.abs(error).mean()), float(rank),
+            float(stars[np.argsort(-values, kind="stable")[:top]].mean()))
+
+
+def report(stars, guesses):
+    print(f"  {'':32}  RMSE   MAE  pořadí*  top 10 %**")
     for name, values in guesses.items():
-        error = values - stars
-        rank = pd.Series(values).rank().corr(pd.Series(stars).rank())  # Spearman, without scipy
-        best = stars[np.argsort(-values, kind="stable")[:top]].mean()
-        print(f"  {name:32}  {np.sqrt((error ** 2).mean()):.3f}  {np.abs(error).mean():.3f}  {rank:7.3f}"
-              f"  {best:.2f}")
-    print(f"  * shoda pořadí odhadů s tvými hodnoceními (Spearman, 1 = stejné pořadí)\n"
-          f"  ** tvůj průměr u desetiny filmů, které odhad dal nejvýš (tvůj celkový průměr {stars.mean():.2f})")
+        rmse, mae, rank, best = metrics(stars, values)
+        print(f"  {name:32}  {rmse:.3f}  {mae:.3f}  {rank:7.3f}  {best:.2f}")
+    print(f"  * shoda pořadí odhadů se skutečnými hodnoceními (Spearman, 1 = stejné pořadí)\n"
+          f"  ** skutečný průměr u desetiny filmů, které odhad dal nejvýš (celkový průměr {stars.mean():.2f})")
+    error = guesses["model"] - stars
+    print(f"  Odhad modelu proti skutečnosti: průměrná odchylka {error.mean():+.2f}, směrodatná odchylka "
+          f"{error.std():.2f}; v rozmezí ±0,5 hvězdy {(np.abs(error) <= 0.5).mean():.0%}, ±1 {(np.abs(error) <= 1).mean():.0%}")
+    print(f"  {'skutečně':>9}  {'počet':>6}  {'průměrný odhad':>14}  {'odchylka':>8}  {'směr. odch.':>11}")
+    for star in range(6):
+        given = stars == star
+        if given.any():
+            e = guesses["model"][given] - star
+            label = "odpad" if star == 0 else "★" * star
+            print(f"  {label:>9}  {given.sum():6}  {guesses['model'][given].mean():14.2f}  {e.mean():+8.2f}"
+                  f"  {e.std():11.2f}")
 
 
 def main():
@@ -63,38 +99,24 @@ def main():
     model = dict(np.load(args.model))
     ratings = load_ratings(args.data)
     films = load_films(args.data)
-    film_index = pd.Series(np.arange(len(model["film_ids"])), index=model["film_ids"])
-    all_stars, all_guesses = [], []
     rng = np.random.default_rng(args.seed)
-    if args.random:
-        counts = ratings.loc[ratings["film_id"].isin(film_index.index), "user_id"].value_counts()
-        user_ids = rng.choice(counts[counts >= 50].index.to_numpy(), args.random, replace=False)
-    else:
-        user_ids = [int(i) for i in args.users.split(",")]
-    verbose = len(user_ids) <= 10
-    for user_id in user_ids:
-        mine = ratings[(ratings["user_id"] == user_id) & ratings["film_id"].isin(film_index.index)]
-        if len(mine) < args.folds * 2:
-            print(f"User {user_id}: only {len(mine)} ratings of films the model knows, skipped")
-            continue
-        positions = film_index[mine["film_id"]].to_numpy()
-        stars = mine["stars"].to_numpy(np.float32)
-        guesses = cross_validate(model, positions, stars, args.folds, rng)
-        all_stars.append(stars)
-        all_guesses.append(guesses)
-        if not verbose:
-            continue
-        print(f"\nUser {user_id}: {len(stars)} ratings, each guessed from the other {args.folds - 1}/{args.folds}")
-        report(stars, guesses)
-        if args.misses:
-            print("  Nejvíc vedle (odhad → tvoje hodnocení):")
-            for i in np.argsort(-np.abs(guesses["model"] - stars))[:args.misses]:
-                film = films.loc[mine["film_id"].iloc[i]]
-                print(f"    {guesses['model'][i]:.1f} → {stars[i]:.0f}  {film['title']} ({film['year']}, {film['kind']})")
-    if len(all_stars) > 1:
-        print(f"\nAll {len(all_stars)} users together:")
-        report(np.concatenate(all_stars), {name: np.concatenate([g[name] for g in all_guesses])
-                                           for name in all_guesses[0]})
+    user_ids = (random_users(ratings, model, args.random, rng) if args.random
+                else [int(i) for i in args.users.split(",")])
+    results = evaluate_users(model, ratings, user_ids, args.folds, rng)
+    if len(user_ids) <= 10:
+        for user_id, mine, stars, guesses in results:
+            print(f"\nUser {user_id}: {len(stars)} ratings, each guessed from the other {args.folds - 1}/{args.folds}")
+            report(stars, guesses)
+            if args.misses:
+                print("  Nejvíc vedle (odhad → skutečnost):")
+                for i in np.argsort(-np.abs(guesses["model"] - stars))[:args.misses]:
+                    film = films.loc[mine["film_id"].iloc[i]]
+                    print(f"    {guesses['model'][i]:.1f} → {stars[i]:.0f}  {film['title']} ({film['year']}, "
+                          f"{film['kind']})")
+    if len(results) > 1:
+        print(f"\nAll {len(results)} users together:")
+        report(np.concatenate([r[2] for r in results]),
+               {name: np.concatenate([r[3][name] for r in results]) for name in results[0][3]})
 
 
 if __name__ == "__main__":
