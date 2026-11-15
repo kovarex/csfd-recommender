@@ -96,6 +96,9 @@ def main():
     parser.add_argument("--min-user-ratings", type=int, default=5)
     parser.add_argument("--min-film-ratings", type=int, default=5)
     parser.add_argument("--patience", type=int, default=3, help="stop after this many epochs without improvement")
+    parser.add_argument("--exclude-users", default="",
+                        help="leave out these users' ratings (comma separated IDs), to test the model on them fairly "
+                             "with ml.evaluate")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -104,6 +107,8 @@ def main():
     started = time.time()
     ratings = load_ratings(args.data)
     print(f"Loaded {len(ratings):,} ratings in {time.time() - started:.0f} s")
+    if args.exclude_users:
+        ratings = ratings[~ratings["user_id"].isin([int(i) for i in args.exclude_users.split(",")])]
     ratings = filter_ratings(ratings, args.min_user_ratings, args.min_film_ratings)
     user_ids, users = index(ratings["user_id"].to_numpy())
     film_ids, films = index(ratings["film_id"].to_numpy())

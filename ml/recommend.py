@@ -58,6 +58,9 @@ def main():
     parser.add_argument("--top", type=int, default=30)
     parser.add_argument("--min-ratings", type=int, default=100, help="only films with at least this many ratings")
     parser.add_argument("--exclude-kinds", default=DEFAULT_EXCLUDED_KINDS)
+    parser.add_argument("--kinds", default="film,TV film,seriál",
+                        help="only these kinds, comma separated, as on the web page (empty = all)")
+    parser.add_argument("--docs", action="store_true", help="also documentaries, hidden by default as on the web page")
     parser.add_argument("--genre", help="only these genres, comma separated (e.g. scifi,fantasy)")
     parser.add_argument("--sort", choices=["best", "above", "below", "match", "opposite"], default="best",
                         help="best: highest predicted rating for you; above/below: where your predicted rating is most "
@@ -82,8 +85,12 @@ def main():
     excluded = set(filter(None, args.exclude_kinds.split(",")))
     kinds = films["kind"].reindex(model["film_ids"]).to_numpy()
     candidates &= ~np.isin(kinds, list(excluded))
+    if args.kinds:
+        candidates &= np.isin(kinds, args.kinds.split(","))
+    genres = load_genres(args.data)
+    if not args.docs and "dokumentarni" not in (args.genre or "").split(","):
+        candidates &= ~np.isin(model["film_ids"], genres[genres["genre"] == "dokumentarni"]["film_id"].to_numpy())
     if args.genre:
-        genres = load_genres(args.data)
         wanted = genres[genres["genre"].isin(args.genre.split(","))]["film_id"]
         in_genre = np.isin(model["film_ids"], wanted.to_numpy())
         print(f"{in_genre.sum():,} films the model knows are {args.genre} (genres from Wikidata)")
