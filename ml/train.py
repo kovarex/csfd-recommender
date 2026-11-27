@@ -44,16 +44,20 @@ class Model(torch.nn.Module):
 def index(values):
     """Maps IDs to 0..n-1; returns the sorted unique IDs and each value's index."""
     ids, positions = np.unique(values, return_inverse=True)
-    return ids, positions.astype(np.int64)
+    return ids, positions.astype(np.int32)
 
 
-def filter_ratings(ratings, min_user_ratings, min_film_ratings):
+def filter_ratings(users, films, min_user_ratings, min_film_ratings):
+    """Which ratings to keep: of users and films with enough ratings. Works on indexes with bincount rather than on
+    a DataFrame, which needed over 10 GB for 140 M ratings."""
+    keep = np.ones(len(users), bool)
     # A few rounds, because dropping films can push users under the limit and the other way round.
     for _ in range(3):
-        film_counts = ratings["film_id"].map(ratings["film_id"].value_counts())
-        user_counts = ratings["user_id"].map(ratings["user_id"].value_counts())
-        ratings = ratings[(film_counts >= min_film_ratings) & (user_counts >= min_user_ratings)]
-    return ratings
+        film_counts = np.bincount(films[keep], minlength=films.max() + 1)
+        user_counts = np.bincount(users[keep], minlength=users.max() + 1)
+        keep &= film_counts[films] >= min_film_ratings
+        keep &= user_counts[users] >= min_user_ratings
+    return keep
 
 
 def rmse(model, users, films, stars, batch):
@@ -109,10 +113,17 @@ def main():
     print(f"Loaded {len(ratings):,} ratings in {time.time() - started:.0f} s")
     if args.exclude_users:
         ratings = ratings[~ratings["user_id"].isin([int(i) for i in args.exclude_users.split(",")])]
-    ratings = filter_ratings(ratings, args.min_user_ratings, args.min_film_ratings)
     user_ids, users = index(ratings["user_id"].to_numpy())
     film_ids, films = index(ratings["film_id"].to_numpy())
     stars = ratings["stars"].to_numpy(np.float32)
+    del ratings
+    keep = filter_ratings(users, films, args.min_user_ratings, args.min_film_ratings)
+    users, films, stars = users[keep], films[keep], stars[keep]
+    del keep
+    # Indexes again over only the users and films left.
+    kept_users, users = index(users)
+    kept_films, films = index(films)
+    user_ids, film_ids = user_ids[kept_users], film_ids[kept_films]
     print(f"Training on {len(stars):,} ratings, {len(user_ids):,} users, {len(film_ids):,} films, device {args.device}")
 
     rng = np.random.default_rng(args.seed)
