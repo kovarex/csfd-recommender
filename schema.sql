@@ -30,8 +30,9 @@ CREATE TABLE IF NOT EXISTS films (
 CREATE TABLE IF NOT EXISTS ratings (
   user_id INT UNSIGNED NOT NULL,
   film_id INT UNSIGNED NOT NULL,
-  -- 0 = "odpad" (trash), 1-5 stars
+  -- 0 = "odpad" (trash), 1-5 stars, and half = 1 adds half a star (ČSFD has half stars since November 2026)
   stars TINYINT UNSIGNED NOT NULL,
+  half TINYINT UNSIGNED NOT NULL DEFAULT 0,
   rated_on DATE NULL,
   PRIMARY KEY (user_id, film_id),
   KEY film_id (film_id)

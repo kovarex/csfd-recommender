@@ -10,7 +10,7 @@ import pandas as pd
 def load_ratings(directory):
     """From the parts downloaded by download-data.sh (ratings-0000.csv.gz, ...), or the single file of an export."""
     paths = sorted(glob.glob(os.path.join(directory, "ratings-*.csv.gz"))) or [os.path.join(directory, "ratings.csv.gz")]
-    dtype = {"user_id": np.int32, "film_id": np.int32, "stars": np.int8}
+    dtype = {"user_id": np.int32, "film_id": np.int32, "stars": np.float32}  # Half stars since November 2026.
     return pd.concat([pd.read_csv(path, dtype=dtype) for path in paths], ignore_index=True)
 
 

@@ -106,10 +106,18 @@ function n($number): string
   return number_format((float)$number, 0, ',', "\u{00a0}");
 }
 
-function stars(int $stars): string
+/** 0 = odpad, otherwise 0.5-5 in half stars (ČSFD has half stars since November 2026). */
+function stars(float $stars): string
 {
-  return $stars === 0 ? 'odpad' : str_repeat('★', $stars) . str_repeat('☆', 5 - $stars);
+  if ($stars <= 0)
+    return 'odpad';
+  $whole = (int)floor($stars);
+  $half = $stars - $whole >= 0.5;
+  return str_repeat('★', $whole) . ($half ? '½' : '') . str_repeat('☆', 5 - $whole - ($half ? 1 : 0));
 }
+
+// A rating in SQL: whole stars plus the half column.
+const STARS_SQL = '(stars + half / 2)';
 
 function url(array $params): string
 {

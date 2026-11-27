@@ -74,11 +74,11 @@ def report(stars, guesses):
     print(f"  Odhad modelu proti skutečnosti: průměrná odchylka {error.mean():+.2f}, směrodatná odchylka "
           f"{error.std():.2f}; v rozmezí ±0,5 hvězdy {(np.abs(error) <= 0.5).mean():.0%}, ±1 {(np.abs(error) <= 1).mean():.0%}")
     print(f"  {'skutečně':>9}  {'počet':>6}  {'průměrný odhad':>14}  {'odchylka':>8}  {'směr. odch.':>11}")
-    for star in range(6):
+    for star in np.unique(stars):
         given = stars == star
         if given.any():
             e = guesses["model"][given] - star
-            label = "odpad" if star == 0 else "★" * star
+            label = "odpad" if star == 0 else "★" * int(star) + ("½" if star % 1 else "")
             print(f"  {label:>9}  {given.sum():6}  {guesses['model'][given].mean():14.2f}  {e.mean():+8.2f}"
                   f"  {e.std():11.2f}")
 

@@ -24,8 +24,8 @@ class Rating:
     title: str
     year: int | None
     kind: str
-    # 0 = "odpad" (trash), 1-5 stars.
-    stars: int
+    # 0 = "odpad" (trash), 0.5-5 stars in halves (ČSFD has half stars since November 2026).
+    stars: float
     rated_on: date | None
 
 
@@ -128,8 +128,10 @@ def parse_row(row):
     stars_match = STARS_RE.search(row)
     if not stars_match:
         raise NotRatingsPage("row without stars")
-    stars_class = stars_match.group(1).split()[-1]
-    stars = int(stars_class.split("-")[1]) if stars_class.startswith("stars-") else 0
+    # "stars stars-3" is 3 stars, "stars stars-half stars-3" 3.5, "stars trash" odpad.
+    classes = stars_match.group(1).split()
+    whole = [int(c[6:]) for c in classes if re.fullmatch(r"stars-\d", c)]
+    stars = (whole[0] if whole else 0) + (0.5 if "stars-half" in classes and whole else 0)
 
     date_match = DATE_RE.search(row)
     rated_on = None

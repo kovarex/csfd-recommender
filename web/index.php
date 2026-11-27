@@ -130,18 +130,18 @@ function user_page(int $id, int $offset): void
   echo '<p>' . n($user['rating_count']) . ' hodnocení · stav ' . h(STATUS_NAMES[$user['status']] ?? '') .
        ' · staženo ' . h(local_time($user['scraped_at'])) . ' · <a href="' . h($csfd) . '">profil na ČSFD</a>' .
        ' · <b><a href="' . h(url(['view' => 'recommend', 'id' => $id])) . '">Doporučení</a></b></p>';
-  distribution(query('SELECT stars, COUNT(*) AS count FROM ratings WHERE user_id=? GROUP BY stars', [$id]));
+  distribution(query('SELECT stars * 2 + half AS halves, COUNT(*) AS count FROM ratings WHERE user_id=? GROUP BY halves', [$id]));
 
   $total = (int)value('SELECT COUNT(*) FROM ratings WHERE user_id=?', [$id]);
   echo pager($total);
-  $rows = query('SELECT r.film_id, r.stars, r.rated_on, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count, s.csfd_percent, s.csfd_count
+  $rows = query('SELECT r.film_id, r.stars + r.half / 2 AS stars, r.rated_on, f.title, f.year, f.kind, f.slug, f.parent_id, s.average, s.rating_count, s.csfd_percent, s.csfd_count
                  FROM ratings r JOIN films f ON f.id=r.film_id LEFT JOIN film_stats s ON s.film_id=r.film_id
                  WHERE r.user_id=? ORDER BY r.rated_on DESC, r.film_id LIMIT ' . PAGE_SIZE . ' OFFSET ' . $offset, [$id]);
   ?>
   <table>
     <tr><th>Film</th><th>Typ</th><th>Hodnocení</th><?= RATING_HEADERS ?><th>Datum</th></tr>
     <?php foreach ($rows as $r): ?>
-      <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><td class="stars"><?= stars((int)$r['stars']) ?></td>
+      <tr><td><?= film_link($r) ?></td><td><?= h($r['kind']) ?></td><td class="stars"><?= stars((float)$r['stars']) ?></td>
         <?= rating_cells($r) ?><td><?= h($r['rated_on']) ?></td></tr>
     <?php endforeach ?>
   </table>
@@ -252,8 +252,8 @@ function recommend_page(int $id): void
 
   $started = microtime(true);
   $ratings = [];
-  foreach (query('SELECT film_id, stars FROM ratings WHERE user_id=?', [$id]) as $r)
-    $ratings[(int)$r['film_id']] = (int)$r['stars'];
+  foreach (query('SELECT film_id, ' . STARS_SQL . ' AS stars FROM ratings WHERE user_id=?', [$id]) as $r)
+    $ratings[(int)$r['film_id']] = (float)$r['stars'];
   $taste = fold_in($model, $ratings);
   if (!$taste || $taste['films'] < 10)
   {
@@ -426,7 +426,7 @@ function similar_users(array $model, array $taste, int $id): void
       <tr><th>Uživatel</th><th class="num">Hodnocení</th><th class="num">Shoda vkusu</th><th class="num">Společných filmů</th>
         <th class="num">Průměrný rozdíl</th></tr>
       <?php foreach ($group as $userId => $cosine):
-        $common = query('SELECT COUNT(*) AS c, AVG(ABS(CAST(a.stars AS SIGNED) - CAST(b.stars AS SIGNED))) AS d FROM ratings a
+        $common = query('SELECT COUNT(*) AS c, AVG(ABS(CAST(a.stars * 2 + a.half AS SIGNED) - CAST(b.stars * 2 + b.half AS SIGNED))) / 2 AS d FROM ratings a
                          JOIN ratings b ON b.user_id=? AND b.film_id=a.film_id WHERE a.user_id=?', [$userId, $id])[0];
         $u = $users[$userId] ?? ['user_id' => $userId, 'name' => null, 'rating_count' => 0]; ?>
         <tr><td><?= user_link($u) ?> <small>(<a href="<?= h(url(['view' => 'recommend', 'id' => $userId])) ?>">doporučení</a>)</small></td>
@@ -479,11 +479,11 @@ function film_page(int $id, int $offset): void
   }
   header_html($film['title'] . ($film['year'] ? ' (' . $film['year'] . ')' : ''));
   $csfd = csfd_film_url($id, $film['slug'], $film['parent_id']);
-  $distribution = query('SELECT stars, COUNT(*) AS count FROM ratings WHERE film_id=? GROUP BY stars', [$id]);
+  $distribution = query('SELECT stars * 2 + half AS halves, COUNT(*) AS count FROM ratings WHERE film_id=? GROUP BY halves', [$id]);
   $total = array_sum(array_column($distribution, 'count'));
   $sum = 0;
   foreach ($distribution as $d)
-    $sum += $d['stars'] * $d['count'];
+    $sum += $d['halves'] / 2 * $d['count'];
   $csfdRating = query('SELECT csfd_percent, csfd_count FROM film_pages WHERE film_id=? AND csfd_percent IS NOT NULL', [$id])[0] ?? null;
   $genres = array_map(fn($g) => h(GENRE_NAMES[$g['genre']] ?? $g['genre']),
                      query('SELECT genre FROM film_genres WHERE film_id=? ORDER BY genre', [$id]));
@@ -499,13 +499,13 @@ function film_page(int $id, int $offset): void
   distribution($distribution);
 
   echo pager($total);
-  $rows = query('SELECT r.user_id, r.stars, r.rated_on, u.name FROM ratings r JOIN users u ON u.id=r.user_id
+  $rows = query('SELECT r.user_id, r.stars + r.half / 2 AS stars, r.rated_on, u.name FROM ratings r JOIN users u ON u.id=r.user_id
                  WHERE r.film_id=? ORDER BY r.rated_on DESC, r.user_id LIMIT ' . PAGE_SIZE . ' OFFSET ' . $offset, [$id]);
   ?>
   <table>
     <tr><th>Uživatel</th><th>Hodnocení</th><th>Datum</th></tr>
     <?php foreach ($rows as $r): ?>
-      <tr><td><?= user_link($r) ?></td><td class="stars"><?= stars((int)$r['stars']) ?></td><td><?= h($r['rated_on']) ?></td></tr>
+      <tr><td><?= user_link($r) ?></td><td class="stars"><?= stars((float)$r['stars']) ?></td><td><?= h($r['rated_on']) ?></td></tr>
     <?php endforeach ?>
   </table>
   <?php
@@ -586,14 +586,16 @@ function rating_cells(array $row): string
   return "<td class=\"num\">$csfd</td><td class=\"num\">$ours</td>";
 }
 
+/** Counts of ratings by half stars (rows with halves and count); half star rows only appear when used. */
 function distribution(array $rows): void
 {
-  $counts = array_fill(0, 6, 0);
+  $counts = array_fill(0, 11, 0);
   foreach ($rows as $r)
-    $counts[(int)$r['stars']] = (int)$r['count'];
+    $counts[(int)$r['halves']] = (int)$r['count'];
   $max = max(1, max($counts));
   echo '<div class="distribution">';
-  for ($s = 5; $s >= 0; $s--)
-    echo '<div><span class="stars">' . stars($s) . '</span><span class="bar" style="width:' . round($counts[$s] / $max * 100) . '%"></span>' . n($counts[$s]) . '</div>';
+  for ($h = 10; $h >= 0; $h--)
+    if ($h % 2 === 0 || $counts[$h])
+      echo '<div><span class="stars">' . stars($h / 2) . '</span><span class="bar" style="width:' . round($counts[$h] / $max * 100) . '%"></span>' . n($counts[$h]) . '</div>';
   echo '</div>';
 }

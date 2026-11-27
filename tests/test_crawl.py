@@ -131,6 +131,11 @@ class ParseTest(unittest.TestCase):
         page = parse_ratings_page(ratings_page(5, 1, 1, [(10, "trash")]))
         self.assertEqual(page.ratings[0].stars, 0)
 
+    def test_half_stars(self):
+        page = parse_ratings_page(ratings_page(5, 1, 1, [(10, "stars-half stars-3"), (11, "stars-half stars-0"),
+                                                         (12, "stars-4")]))
+        self.assertEqual([r.stars for r in page.ratings], [3.5, 0.5, 4])
+
     def test_episode_keeps_parent_series(self):
         html = ratings_page(5, 1, 1, [(10, "stars-4")]).replace('/film/10-film-10/', '/film/7-serial/10-film-10/')
         rating = parse_ratings_page(html).ratings[0]
@@ -332,14 +337,15 @@ class CrawlTest(unittest.TestCase):
         import csv, gzip, tempfile
         from csfd import export
         db.create_schema(self.connection)
-        pages = {url(1): ratings_page(1, 1, 1, [(100, "stars-5")]), url(450): ratings_page(450, 1, 1, [(101, "trash")])}
+        pages = {url(1): ratings_page(1, 1, 1, [(100, "stars-5"), (102, "stars-half stars-2")]),
+                 url(450): ratings_page(450, 1, 1, [(101, "trash")])}
         db.requeue_user(self.connection, 1)
         db.requeue_user(self.connection, 450)
         self.crawl(FakeFetcher(pages))
         with tempfile.TemporaryDirectory() as directory:
             export.export(self.connection, directory)
             with gzip.open(os.path.join(directory, "ratings.csv.gz"), "rt") as f:
-                self.assertEqual(sorted(csv.reader(f))[:-1], [["1", "100", "5"], ["450", "101", "0"]])
+                self.assertEqual(sorted(csv.reader(f))[:-1], [["1", "100", "5"], ["1", "102", "2.5"], ["450", "101", "0"]])
 
     def test_published_export_continues_over_runs(self):
         import csv, gzip, tempfile
@@ -424,7 +430,7 @@ class CrawlTest(unittest.TestCase):
             real_run = db.run_statement.__wrapped__
 
             def run_statement(connection, sql, params=None):
-                if sql.startswith("SELECT film_id, stars FROM ratings"):
+                if sql.startswith("SELECT film_id, stars * 2 + half FROM ratings"):
                     reads.append(params[0])
                     clock[0] += 40  # Each range takes 40 s.
                 return real_run(connection, sql, params)
@@ -452,6 +458,22 @@ class CrawlTest(unittest.TestCase):
         db.create_schema(self.connection)
         self.assertEqual(db.films_without_genres(self.connection, 100, 10), [1])
         self.assertEqual(self.query("SELECT csfd_percent FROM film_stats"), ((None,),))
+
+    def test_migration_adds_half_stars_to_old_ratings(self):
+        db.create_schema(self.connection)
+        with self.connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE ratings DROP COLUMN half")
+            cursor.execute("INSERT INTO ratings (user_id, film_id, stars) VALUES (1, 2, 4)")
+        db.create_schema(self.connection)
+        db.save_page(self.connection, 1, parse_ratings_page(ratings_page(1, 1, 1, [(3, "stars-half stars-4")])), 1)
+        self.assertEqual(self.query("SELECT film_id, stars, half FROM ratings ORDER BY film_id"), ((2, 4, 0), (3, 4, 1)))
+
+    def test_film_stats_count_half_stars(self):
+        db.create_schema(self.connection)
+        db.save_page(self.connection, 1, parse_ratings_page(ratings_page(1, 1, 1, [(3, "stars-half stars-4")])), 1)
+        db.save_page(self.connection, 2, parse_ratings_page(ratings_page(2, 1, 1, [(3, "stars-3")])), 1)
+        db.refresh_film_stats(self.connection)
+        self.assertEqual(self.query("SELECT rating_count, average FROM film_stats WHERE film_id=3"), ((2, Decimal("3.75")),))
 
     def test_migration_adds_the_kind_to_old_film_stats(self):
         db.create_schema(self.connection)

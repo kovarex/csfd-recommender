@@ -105,6 +105,9 @@ ADDED_COLUMNS = [
                                     "ADD COLUMN csfd_count INT UNSIGNED NULL", "DELETE FROM film_pages"]),
     ("film_stats", "csfd_percent", ["ALTER TABLE film_stats ADD COLUMN csfd_percent TINYINT UNSIGNED NULL, "
                                     "ADD COLUMN csfd_count INT UNSIGNED NULL"]),
+    # Half stars (ČSFD since November 2026): a rating is stars + half / 2. INSTANT, so it fails at once rather than
+    # copying 140 M ratings.
+    ("ratings", "half", ["ALTER TABLE ratings ADD COLUMN half TINYINT UNSIGNED NOT NULL DEFAULT 0, ALGORITHM=INSTANT"]),
 ]
 
 
@@ -251,11 +254,11 @@ def refresh_film_stats(connection, state_dir=None, seconds=0):
     counts, sums = scan["counts"], scan["sums"]
 
     def consume(rows):
-        for film_id, stars in rows:
+        for film_id, halves in rows:
             counts[film_id] = counts.get(film_id, 0) + 1
-            sums[film_id] = sums.get(film_id, 0) + stars
+            sums[film_id] = sums.get(film_id, 0) + halves / 2
 
-    if (not scan_ratings(connection, scan, path, "film_id, stars", consume, deadline, progress)
+    if (not scan_ratings(connection, scan, path, "film_id, stars * 2 + half", consume, deadline, progress)
             or deadline is not None and deadline - time.time() < FILM_STATS_WRITE_SECONDS):
         progress(f"read users up to {min(scan['next'], scan['high']):,} of {scan['high']:,}, continuing in the next run")
         return False
@@ -348,10 +351,11 @@ def refresh_series_stats(connection, state_dir=None, seconds=0):
 
     def consume(rows):
         per_user = {}  # (user, series) -> [count, sum, sum of squares]; a range holds all of its users' ratings.
-        for user_id, film_id, stars in rows:
+        for user_id, film_id, halves in rows:
             series = episode_series.get(film_id)
             if series is None:
                 continue
+            stars = halves / 2
             episodes.setdefault(series, set()).add(film_id)
             sums = per_user.setdefault((user_id, series), [0, 0, 0])
             sums[0] += 1
@@ -363,7 +367,7 @@ def refresh_series_stats(connection, state_dir=None, seconds=0):
                 users[series] = users.get(series, 0) + 1
 
     progress = lambda phase: set_state(connection, "series_stats_progress", f"{phase} ({time.time() - started:.0f} s)")
-    if not scan_ratings(connection, scan, path, "user_id, film_id, stars", consume, deadline, progress):
+    if not scan_ratings(connection, scan, path, "user_id, film_id, stars * 2 + half", consume, deadline, progress):
         progress(f"read users up to {min(scan['next'], scan['high']):,} of {scan['high']:,}, continuing in the next run")
         return False
     rows = [(series, users[series], len(episodes[series]), round(spread_sums[series] / users[series], 3))
@@ -566,9 +570,9 @@ def save_page(connection, user_id, page, page_number):
                 [(r.film_id, r.parent_id, r.slug[:1000], r.title[:300], r.year, r.kind[:40]) for r in ratings],
             )
             changed = cursor.executemany(
-                "INSERT INTO ratings (user_id, film_id, stars, rated_on) VALUES (%s, %s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE stars=VALUES(stars), rated_on=VALUES(rated_on)",
-                [(user_id, r.film_id, r.stars, r.rated_on) for r in ratings],
+                "INSERT INTO ratings (user_id, film_id, stars, half, rated_on) VALUES (%s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE stars=VALUES(stars), half=VALUES(half), rated_on=VALUES(rated_on)",
+                [(user_id, r.film_id, int(r.stars), int(r.stars * 2) % 2, r.rated_on) for r in ratings],
             )
         cursor.execute(
             "UPDATE users SET slug=COALESCE(%s, slug), name=COALESCE(%s, name), page_count=%s, pages_done=%s "

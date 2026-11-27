@@ -16,7 +16,8 @@ log = logging.getLogger("csfd")
 # The NFS database drops long-running queries, so every table is read in short chunks over ranges of its key.
 TABLES = {
     "ratings.csv.gz": ("user_id,film_id,stars",
-                       "SELECT user_id, film_id, stars FROM ratings WHERE user_id BETWEEN %s AND %s",
+                       "SELECT user_id, film_id, CONCAT(stars, IF(half, '.5', '')) FROM ratings "
+                       "WHERE user_id BETWEEN %s AND %s",
                        "user_id", "ratings", 200),
     "films.csv.gz": ("film_id,parent_id,slug,title,year,kind",
                      "SELECT id, parent_id, slug, title, year, kind FROM films WHERE id BETWEEN %s AND %s",
