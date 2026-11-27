@@ -24,8 +24,10 @@ def fold_in(model, film_positions, stars):
     q = model["film_vectors"][film_positions]
     a = np.hstack([q, np.ones((len(q), 1), np.float32)])
     target = stars - model["mean"] - model["film_bias"][film_positions]
-    # Same regularisation as in training, where every rating adds reg · |vector|² to the loss.
-    regularisation = float(model["reg"]) * len(stars) * np.eye(a.shape[1], dtype=np.float32)
+    # Like in training, where every rating adds reg · |vector|² to the loss, but weaker (fold_in_reg): measured with
+    # ml.evaluate on 27 Nov 2026, a fifth to a third of the training value guesses everyone's hidden ratings better.
+    reg = float(model["fold_in_reg"] if "fold_in_reg" in model else model["reg"])
+    regularisation = reg * len(stars) * np.eye(a.shape[1], dtype=np.float32)
     regularisation[-1, -1] = 1e-3 * len(stars)
     solution = np.linalg.solve(a.T @ a + regularisation, a.T @ target)
     return solution[:-1], solution[-1]

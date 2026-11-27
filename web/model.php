@@ -74,7 +74,7 @@ function fold_in(array $model, array $ratings): ?array
   }
   if ($n === 0)
     return null;
-  // Same regularisation as in training (see fold_in in ml/recommend.py).
+  // The fold-in regularisation (see fold_in in ml/recommend.py; ml.publish writes it as "reg").
   for ($r = 0; $r < $size; $r++)
   {
     $a[$r * $size + $r] += ($r < $k ? $model['reg'] : 1e-3) * $n;

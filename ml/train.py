@@ -96,6 +96,9 @@ def main():
     parser.add_argument("--lr", type=float, default=0.005)
     parser.add_argument("--reg", type=float, default=0.05, help="L2 regularisation of the vectors")
     parser.add_argument("--bias-reg", type=float, default=0.01, help="L2 regularisation of the biases")
+    parser.add_argument("--fold-in-reg", type=float, default=0.15,
+                        help="regularisation when a user's taste is computed from their ratings (ml.recommend, the "
+                             "web), as a share of --reg")
     parser.add_argument("--holdout", type=float, default=0.05, help="share of ratings held out for validation")
     parser.add_argument("--min-user-ratings", type=int, default=5)
     parser.add_argument("--min-film-ratings", type=int, default=5)
@@ -164,6 +167,7 @@ def main():
         args.out,
         mean=np.float32(mean),
         reg=np.float32(args.reg),
+        fold_in_reg=np.float32(args.reg * args.fold_in_reg),
         user_ids=user_ids,
         user_vectors=best_state["user_vectors.weight"].numpy(),
         user_bias=best_state["user_bias.weight"].numpy()[:, 0],
